@@ -1,0 +1,63 @@
+"""
+Collection management for writing library Qdrant collections.
+"""
+import os
+import sys
+from pathlib import Path
+
+import structlog
+
+logger = structlog.get_logger(__name__)
+
+VECTOR_SIZE = 768  # text-embedding-nomic-embed-text-v1.5 (local LM Studio)
+
+
+def get_collection_names() -> dict:
+    """Return configured collection names from environment."""
+    return {
+        "passages": os.getenv("COLLECTION_PASSAGES", "writing_passages"),
+        "terms": os.getenv("COLLECTION_TERMS", "writing_terms"),
+    }
+
+
+def setup_collections() -> dict:
+    """
+    Ensure both Qdrant collections exist with hybrid vector config.
+    Returns dict with creation status for each collection.
+    """
+    from kbase.vector.sync_indexing import ensure_collection
+
+    names = get_collection_names()
+    results = {}
+
+    for key, collection_name in names.items():
+        try:
+            created = ensure_collection(
+                collection_name=collection_name,
+                vector_size=VECTOR_SIZE,
+                hybrid=True,
+            )
+            status = "created" if created else "already_exists"
+            results[key] = {"collection": collection_name, "status": status}
+            logger.info("Collection ready", collection=collection_name, status=status)
+        except Exception as e:
+            results[key] = {"collection": collection_name, "status": "error", "error": str(e)}
+            logger.error("Collection setup failed", collection=collection_name, error=str(e))
+
+    return results
+
+
+def get_stats() -> dict:
+    """Return point counts for both collections."""
+    from kbase.vector.sync_search import get_collection_stats
+
+    names = get_collection_names()
+    stats = {}
+
+    for key, collection_name in names.items():
+        try:
+            stats[key] = get_collection_stats(collection_name)
+        except Exception as e:
+            stats[key] = {"collection": collection_name, "error": str(e)}
+
+    return stats
