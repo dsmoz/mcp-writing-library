@@ -9,6 +9,8 @@ MCP server for writing passages and terminology dictionary with hybrid semantic 
 | `src/tools/passages` | `add_passage`, `search_passages` | Store and retrieve exemplary writing passages |
 | `src/tools/terms` | `add_term`, `search_terms` | Store and retrieve terminology dictionary entries |
 | `src/tools/collections` | `get_collection_names`, `setup_collections`, `get_stats` | Manage Qdrant collections |
+| `src/tools/styles` | `list_styles` | Writing style registry (14 labels across 4 categories) |
+| `src/tools/plagiarism` | `check_internal_similarity`, `check_external_similarity`, `score_external_similarity` | Similarity detection against library and web |
 
 ## Pattern 1 — Vocabulary Review
 
@@ -35,6 +37,16 @@ result = add_passage(
     tags=["problem-statement", "discursive"],
     source="lambda-proposal-2026"
 )
+```
+
+## Pattern 3 — Similarity Check Before Adding
+
+Before storing a new passage, verify it is not a duplicate of existing library content:
+
+```python
+result = check_internal_similarity(text="...", threshold=0.85)
+# Returns verdict: "clean" or "flagged" with matching sentences and scores
+# Only call add_passage if verdict == "clean"
 ```
 
 ## Common Pitfalls
