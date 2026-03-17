@@ -17,6 +17,7 @@ def get_collection_names() -> dict:
     return {
         "passages": os.getenv("COLLECTION_PASSAGES", "writing_passages"),
         "terms": os.getenv("COLLECTION_TERMS", "writing_terms"),
+        "style_profiles": os.getenv("COLLECTION_STYLE_PROFILES", "writing_style_profiles"),
     }
 
 

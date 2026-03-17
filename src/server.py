@@ -270,6 +270,92 @@ def check_external_similarity(
 
 
 @mcp.tool()
+def save_style_profile(
+    name: str,
+    style_scores: dict,
+    rules: list,
+    anti_patterns: list,
+    sample_excerpts: list,
+    description: str = "",
+    source_documents: list = [],
+) -> dict:
+    """
+    Save a writing style profile extracted from writing samples.
+
+    After analysing 2–5 writing samples against the 14 style dimensions,
+    call this to persist the profile in Qdrant for future retrieval.
+
+    Workflow:
+        1. User shares 2–5 writing samples
+        2. Claude analyses them against list_styles() dimensions
+        3. Claude calls save_style_profile() with the resulting profile
+        4. Use load_style_profile() or search_style_profiles() to retrieve later
+
+    Args:
+        name: Unique profile name (e.g. "danilo-voice-pt", "lambda-proposals")
+        style_scores: Dict mapping style labels to scores 0.0–1.0
+                      (e.g. {"narrative": 0.8, "conversational": 0.7})
+        rules: Writing rules inferred from the samples
+               (e.g. ["Uses em-dashes for asides", "Avoids passive voice"])
+        anti_patterns: Patterns absent or contrary to this style
+                       (e.g. ["'leverage'", "Excessive nominalisations"])
+        sample_excerpts: Short representative quotes from the writing samples
+        description: Human-readable summary of the style
+        source_documents: Names or titles of the writing samples analysed
+
+    Returns:
+        {success, name, document_id, chunks_created, warnings}
+    """
+    from src.tools.style_profiles import save_style_profile as _save
+    return _save(
+        name=name,
+        style_scores=style_scores,
+        rules=rules,
+        anti_patterns=anti_patterns,
+        sample_excerpts=sample_excerpts,
+        description=description,
+        source_documents=source_documents,
+    )
+
+
+@mcp.tool()
+def load_style_profile(name: str) -> dict:
+    """
+    Load a saved writing style profile by exact name.
+
+    Use this to retrieve a profile previously saved with save_style_profile(),
+    for example to guide writing generation or passage retrieval.
+
+    Args:
+        name: Profile name as used in save_style_profile (e.g. "danilo-voice-pt")
+
+    Returns:
+        {success, profile} with full profile payload, or {success: False, error}
+    """
+    from src.tools.style_profiles import load_style_profile as _load
+    return _load(name=name)
+
+
+@mcp.tool()
+def search_style_profiles(text: str, top_k: int = 3) -> dict:
+    """
+    Find saved style profiles most similar to a writing sample.
+
+    Use this to identify which saved writing style a piece of text most closely
+    matches — for example, before tagging a passage or adapting a draft.
+
+    Args:
+        text: A writing sample to compare against saved profiles
+        top_k: Number of results to return (default 3)
+
+    Returns:
+        {success, results: [{score, profile}], total}
+    """
+    from src.tools.style_profiles import search_style_profiles as _search
+    return _search(text=text, top_k=top_k)
+
+
+@mcp.tool()
 def score_external_similarity(
     text: str,
     search_results: list,

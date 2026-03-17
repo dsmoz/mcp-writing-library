@@ -11,6 +11,7 @@ MCP server for writing passages and terminology dictionary with hybrid semantic 
 | `src/tools/collections` | `get_collection_names`, `setup_collections`, `get_stats` | Manage Qdrant collections |
 | `src/tools/styles` | `list_styles` | Writing style registry (14 labels across 4 categories) |
 | `src/tools/plagiarism` | `check_internal_similarity`, `check_external_similarity`, `score_external_similarity` | Similarity detection against library and web |
+| `src/tools/style_profiles` | `save_style_profile`, `load_style_profile`, `search_style_profiles` | Extract and retrieve writing style profiles from samples |
 
 ## Pattern 1 — Vocabulary Review
 
@@ -47,6 +48,34 @@ Before storing a new passage, verify it is not a duplicate of existing library c
 result = check_internal_similarity(text="...", threshold=0.85)
 # Returns verdict: "clean" or "flagged" with matching sentences and scores
 # Only call add_passage if verdict == "clean"
+```
+
+## Pattern 4 — Style Profile Extraction
+
+When a user shares writing samples and wants their style captured:
+
+1. Call `list_styles()` to see the 14 dimensions
+2. Analyse the samples: score each dimension, extract rules, anti-patterns, and representative excerpts
+3. Call `save_style_profile()` to persist the result
+
+```python
+result = save_style_profile(
+    name="danilo-voice-pt",
+    description="Analytical but direct. Southern African context. Rhythm variation.",
+    style_scores={"narrative": 0.7, "argumentative": 0.8, "conversational": 0.6, "formal": 0.3},
+    rules=["Varies sentence length deliberately", "Opens with a concrete observation"],
+    anti_patterns=["'leverage'", "passive constructions", "Furthermore/Moreover"],
+    sample_excerpts=["In Mozambique, the data tells only part of the story."],
+    source_documents=["lambda-proposal-2026.docx", "linkedin-post-march-2026.txt"],
+)
+```
+
+To retrieve a profile later:
+
+```python
+profile = load_style_profile(name="danilo-voice-pt")
+# or search by similarity to a text sample:
+matches = search_style_profiles(text="The evidence is clear, but the politics are not.")
 ```
 
 ## Common Pitfalls
