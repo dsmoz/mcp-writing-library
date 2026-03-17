@@ -979,6 +979,7 @@ dependencies = [
     { name = "kbase-core" },
     { name = "mcp" },
     { name = "python-dotenv" },
+    { name = "requests" },
     { name = "structlog" },
 ]
 
@@ -998,6 +999,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "requests", specifier = ">=2.31.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "structlog", specifier = ">=24.0.0" },
 ]

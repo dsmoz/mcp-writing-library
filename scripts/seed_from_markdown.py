@@ -164,7 +164,141 @@ def seed_passages():
     print(f"Passages: {ok} added, {fail} failed")
 
 
+# ----------------------------------------------------------------
+# Style-tagged passage seed data
+# ----------------------------------------------------------------
+STYLE_SEED_PASSAGES = [
+    # structural: narrative
+    dict(
+        text="In 2022, a community health worker in Nampula described her daily rounds as 'walking between two worlds': one where health data was recorded dutifully in logbooks, another where those records never reached the district office. Her observation captures a structural failure that national surveys have since confirmed at scale.",
+        doc_type="report", language="en", domain="srhr",
+        quality_notes="Opens with an individual story, scales to systemic observation. Classic narrative structure.",
+        tags=["story-led", "systemic-observation", "community-voice"],
+        source="manual",
+        style=["narrative", "conversational"],
+    ),
+    # structural: data-driven
+    dict(
+        text="Coverage rates for antenatal care reached 87% nationally in 2023, up from 71% in 2018. Yet facility-based delivery rates stagnated at 54%, revealing a persistent dropout between first ANC contact and skilled birth attendance. This gap is not random: it tracks closely with distance to the nearest health facility, a factor that accounts for 63% of the variance in delivery outcomes across districts.",
+        doc_type="report", language="en", domain="srhr",
+        quality_notes="Leads with data, explains causation. Each sentence adds interpretive depth. No hedging.",
+        tags=["statistics", "causation", "health-data"],
+        source="manual",
+        style=["data-driven", "formal"],
+    ),
+    # structural: argumentative
+    dict(
+        text="The funding gap in community-led HIV responses is not a technical problem. It is a political one. Donors have consistently underfunded grassroots organisations relative to their epidemiological footprint, a pattern that cannot be explained by capacity concerns alone. If the goal is to reach key populations, then the current allocation logic is working against it.",
+        doc_type="policy-brief", language="en", domain="srhr",
+        quality_notes="States thesis in first sentence. Builds case with evidence. Final sentence returns to the argument.",
+        tags=["thesis-driven", "funding", "advocacy"],
+        source="manual",
+        style=["argumentative", "advocacy"],
+    ),
+    # structural: minimalist
+    dict(
+        text="Three findings stand out. First, service access has improved. Second, quality has not. Third, the gap between the two is widening. Any strategy that addresses access without addressing quality will not close the outcome gap.",
+        doc_type="executive-summary", language="en", domain="general",
+        quality_notes="High information density. Short, parallel structure. No filler. Final sentence is the implication.",
+        tags=["crisp", "parallel-structure", "executive"],
+        source="manual",
+        style=["minimalist", "formal"],
+    ),
+    # tonal: donor-facing
+    dict(
+        text="By the end of Year 2, the project will have directly reached 12,400 rights-holders across four provinces, with 78% of participants demonstrating improved knowledge of SRHR services. The sustainability plan — embedded in the district health system from Month 6 — ensures continued service delivery beyond the grant period without additional donor financing.",
+        doc_type="concept-note", language="en", domain="srhr",
+        quality_notes="Results chain is explicit. Indicators anchored to timeline. Sustainability language reassures donors.",
+        tags=["results-chain", "indicators", "sustainability"],
+        source="manual",
+        style=["donor-facing", "formal"],
+    ),
+    # tonal: advocacy
+    dict(
+        text="Criminalisation does not protect communities. It protects the status quo. When same-sex relationships remain illegal, health workers cannot ask the right questions, organisations cannot operate openly, and people cannot seek care without fear. The evidence is consistent across every context where these laws have been studied. The question is not whether decriminalisation improves health outcomes. It does. The question is whether policymakers are willing to act on that evidence.",
+        doc_type="policy-brief", language="en", domain="srhr",
+        quality_notes="Rights-based framing, urgency without hyperbole. Rhetorical build. Evidence-anchored conclusion.",
+        tags=["rights-based", "criminalisation", "LGBTQIA"],
+        source="manual",
+        style=["advocacy", "argumentative"],
+    ),
+    # source: undp
+    dict(
+        text="Human development progress in Southern Africa has been uneven, reflecting both the gains of the post-2000 period and the persistent structural constraints that limit their sustainability. Where capabilities have expanded — in education, in health access, in civic participation — the gains are real but remain concentrated among those already closest to opportunity. Addressing this distribution challenge requires not only continued investment but a reconsideration of how development resources are allocated across population groups.",
+        doc_type="report", language="en", domain="governance",
+        quality_notes="UNDP HDR register. Capability framing. Discursive transitions. No em-dashes. Measured language.",
+        tags=["capability", "HDR-register", "distribution"],
+        source="undp-hdr",
+        style=["undp", "formal", "data-driven"],
+    ),
+    # source: danilo-voice
+    dict(
+        text="The organisations doing the hardest work in this sector are rarely the ones receiving the largest grants. That is not an accident of funding systems — it is a feature of them. Community-based organisations working with key populations in Mozambique and Angola operate in a context where visibility is risk, where legal ambiguity discourages formal registration, and where donor due diligence processes were designed for a different kind of organisation entirely. The question practitioners should be asking is not how to help these organisations fit the system. It is how to change the system so it stops excluding them.",
+        doc_type="general", language="en", domain="srhr",
+        quality_notes="Direct, analytical, Southern African context. Rhythm variation. Ends with a reframe. Personal voice.",
+        tags=["personal-voice", "system-critique", "SADC", "funding"],
+        source="manual",
+        style=["danilo-voice", "argumentative", "conversational"],
+    ),
+    # anti-pattern: ai-sounding
+    dict(
+        text="In today's rapidly evolving landscape, it is crucial to leverage synergies between stakeholders to harness transformative change. Furthermore, by delving into the complexities of the ecosystem, we can unlock unprecedented opportunities for impact. It goes without saying that utilising best practices will be paramount to achieving optimal outcomes.",
+        doc_type="general", language="en", domain="general",
+        quality_notes="NEGATIVE EXAMPLE. Contains: em-dashes absent but multiple AI slop markers — 'leverage', 'harness', 'delve', 'unprecedented', 'paramount', 'optimal', 'Furthermore', 'It goes without saying', 'rapidly evolving landscape'.",
+        tags=["anti-pattern", "AI-slop", "do-not-use"],
+        source="manual",
+        style=["ai-sounding"],
+    ),
+    # anti-pattern: bureaucratic
+    dict(
+        text="The implementation of the aforementioned programmatic interventions shall be conducted in accordance with the established operational frameworks and procedural guidelines, ensuring the maximisation of resource utilisation efficiencies whilst simultaneously ensuring compliance with all applicable regulatory requirements and donor reporting obligations.",
+        doc_type="report", language="en", domain="general",
+        quality_notes="NEGATIVE EXAMPLE. Dense nominalisations, passive voice, stacked abstractions, zero concrete information.",
+        tags=["anti-pattern", "nominalisation", "passive-voice", "do-not-use"],
+        source="manual",
+        style=["bureaucratic"],
+    ),
+    # tonal: conversational (LinkedIn)
+    dict(
+        text="Most grant applications fail before the first reviewer reads a word. Not because the project is weak — because the opening paragraph loses them. I've reviewed hundreds of proposals across Mozambique and Angola. The ones that work all do the same thing: they start with the problem, not the organisation. One sentence. The problem. That's the hook.",
+        doc_type="general", language="en", domain="general",
+        quality_notes="LinkedIn/conversational register. Short paragraphs. Direct address. 'I've' is intentional. Ends with punchy takeaway.",
+        tags=["LinkedIn", "conversational", "grant-writing", "hook"],
+        source="manual",
+        style=["conversational", "danilo-voice", "narrative"],
+    ),
+    # structural: narrative (Portuguese)
+    dict(
+        text="Em 2021, uma organização de base em Maputo perdeu o seu financiamento principal três semanas antes do final do ano fiscal. O coordenador de programas descreveu aquela semana como 'o momento em que percebemos que éramos invisíveis para o sistema'. Não era uma crise de competência — era uma crise de visibilidade. A organização sabia o que fazer. O problema era que ninguém a via a fazê-lo.",
+        doc_type="report", language="pt", domain="srhr",
+        quality_notes="PT narrative voice. Story-led, scales to systemic observation. Natural Portuguese rhythm. Ends with a distinction that reframes the problem.",
+        tags=["story-led", "PT", "funding-crisis", "visibility"],
+        source="manual",
+        style=["narrative", "danilo-voice"],
+    ),
+]
+
+
+def seed_style_passages():
+    print(f"\nSeeding {len(STYLE_SEED_PASSAGES)} style-tagged passages...")
+    ok, fail = 0, 0
+    for passage in STYLE_SEED_PASSAGES:
+        result = add_passage(**passage)
+        if result["success"]:
+            ok += 1
+            styles_str = ", ".join(passage.get("style", []))
+            print(f"  ✅ [{styles_str}] {passage['text'][:50]}...")
+            if result.get("warnings"):
+                for w in result["warnings"]:
+                    print(f"     ⚠️  {w}")
+        else:
+            fail += 1
+            print(f"  ❌ {result.get('error')}")
+    print(f"Style passages: {ok} added, {fail} failed")
+
+
 if __name__ == "__main__":
     seed_terms()
     seed_passages()
+    seed_style_passages()
     print("\nDone. Run setup_collections.py stats to verify counts.")

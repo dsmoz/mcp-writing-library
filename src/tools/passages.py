@@ -6,6 +6,7 @@ from uuid import uuid4
 import structlog
 
 from src.tools.collections import get_collection_names
+from src.tools.styles import VALID_STYLES
 
 logger = structlog.get_logger(__name__)
 
@@ -33,6 +34,7 @@ def add_passage(
     quality_notes: str = "",
     tags: Optional[List[str]] = None,
     source: str = "manual",
+    style: Optional[List[str]] = None,
 ) -> dict:
     """Store an exemplary writing passage in the writing_passages collection."""
     if doc_type not in VALID_DOC_TYPES:
@@ -48,6 +50,15 @@ def add_passage(
     if not text or not text.strip():
         return {"success": False, "error": "text cannot be empty"}
 
+    style = style or []
+    unknown_styles = [s for s in style if s not in VALID_STYLES]
+    warnings = []
+    if unknown_styles:
+        warnings.append(
+            f"Unknown style(s) ignored: {unknown_styles}. Valid styles: {sorted(VALID_STYLES)}"
+        )
+        style = [s for s in style if s in VALID_STYLES]
+
     document_id = str(uuid4())
     collection = get_collection_names()["passages"]
     title = f"[{doc_type.upper()} | {language.upper()}] {text[:60]}..."
@@ -60,6 +71,7 @@ def add_passage(
         "tags": tags or [],
         "source": source,
         "entry_type": "passage",
+        "style": style,
     }
 
     try:
@@ -76,6 +88,7 @@ def add_passage(
             "document_id": document_id,
             "chunks_created": len(point_ids),
             "collection": collection,
+            "warnings": warnings,
         }
     except Exception as e:
         logger.error("Failed to add passage", error=str(e))
@@ -87,6 +100,7 @@ def search_passages(
     doc_type: Optional[str] = None,
     language: Optional[str] = None,
     domain: Optional[str] = None,
+    style: Optional[str] = None,
     top_k: int = 5,
 ) -> dict:
     """Search for exemplary writing passages by semantic similarity."""
@@ -100,11 +114,14 @@ def search_passages(
     if domain:
         filter_conditions["domain"] = domain
 
+    # Over-fetch when style filtering is needed (post-filter reduces result count)
+    fetch_k = top_k * 3 if style else top_k
+
     try:
         raw_results = semantic_search(
             collection_name=collection,
             query=query,
-            limit=top_k,
+            limit=fetch_k,
             filter_conditions=filter_conditions if filter_conditions else None,
         )
 
@@ -119,9 +136,16 @@ def search_passages(
                 "domain": r.get("metadata", {}).get("domain"),
                 "quality_notes": r.get("metadata", {}).get("quality_notes"),
                 "tags": r.get("metadata", {}).get("tags", []),
+                "style": r.get("metadata", {}).get("style", []),
                 "source": r.get("metadata", {}).get("source"),
                 "document_id": r.get("document_id"),
             })
+
+        # Post-filter by style — kbase-core uses MatchValue which cannot match list fields
+        if style:
+            results = [r for r in results if style in r.get("style", [])]
+
+        results = results[:top_k]
 
         return {"success": True, "results": results, "total": len(results)}
     except Exception as e:
