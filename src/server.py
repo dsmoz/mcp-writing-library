@@ -12,6 +12,7 @@ Tools:
     check_internal_similarity — detect similarity against library passages
     check_external_similarity — detect similarity against web content (Tavily)
     score_external_similarity — score pre-fetched search results for similarity
+    score_ai_patterns        — score text against known AI writing patterns
 """
 from typing import Optional, List
 from mcp.server.fastmcp import FastMCP
@@ -384,3 +385,41 @@ def score_external_similarity(
         threshold=threshold,
         verdict_threshold_pct=verdict_threshold_pct,
     )
+
+
+@mcp.tool()
+def score_ai_patterns(
+    text: str,
+    language: str = "auto",
+    threshold: float = 0.25,
+) -> dict:
+    """
+    Score text against known AI writing patterns.
+
+    Returns overall score (0.0=human, 1.0=AI), per-category findings, and a verdict.
+    Use before delivery to identify and fix AI-sounding patterns.
+
+    Categories scored:
+        connector_repetition  — Overused connectors: Furthermore, Additionally, Moreover
+        hollow_intensifiers   — "It is important to note that", "It is crucial that"
+        grandiose_openers     — Dramatic paragraph openings typical of AI prose
+        em_dash_intercalation — Paired em-dashes used as parenthetical inserts (AI pattern)
+        sentence_monotony     — 3+ consecutive sentences of similar length (±3 words)
+        passive_voice         — High passive voice density (>25% of sentences)
+        paragraph_length      — Paragraphs exceeding 4 sentences (UNDP standard)
+        discursive_deficit    — Fewer than 2 discursive expressions per ~300 words
+        mechanical_listing    — Paragraph openers: Firstly, Secondly, Thirdly, Finally
+        generic_closings      — "In conclusion, this report has shown...", etc.
+
+    Args:
+        text: The text to score (full document or section)
+        language: "en", "pt", or "auto" (default: auto-detect)
+        threshold: Per-category score above which a category is flagged (default: 0.25)
+
+    Returns:
+        dict with overall_score, verdict (clean|review|ai-sounding), per-category
+        scores and findings with exact excerpts, summary, word_count, page_equivalent.
+        Verdict thresholds: clean <0.25 | review 0.25–0.55 | ai-sounding ≥0.55
+    """
+    from src.tools.ai_patterns import score_ai_patterns as _score
+    return _score(text=text, language=language, threshold=threshold)
