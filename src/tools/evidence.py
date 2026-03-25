@@ -72,6 +72,67 @@ _ALL_CLAIM_PATTERNS = [
 
 _CITATION_PATTERNS = [_PATTERN_CITATION_APA, _PATTERN_CITATION_NUMERIC]
 
+# ---------------------------------------------------------------------------
+# Domain-specific claim-detection patterns
+# ---------------------------------------------------------------------------
+
+_DOMAIN_PATTERNS = {
+    "finance": re.compile(
+        r'\b(budget|cost|funding|expenditure|revenue|margin|deficit|surplus'
+        r'|USD|EUR|MZN|GBP|million|billion|thousand'
+        r'|orçamento|custo|financiamento|despesa|receita|défice|excedente)\b',
+        re.IGNORECASE,
+    ),
+    "governance": re.compile(
+        r'\b(corruption|accountability|transparency|participation|oversight'
+        r'|governance|electoral|civil society|rule of law'
+        r'|corrupção|responsabilização|transparência|participação|fiscalização'
+        r'|governação|governança|sociedade civil|estado de direito)\b',
+        re.IGNORECASE,
+    ),
+    "climate": re.compile(
+        r'\b(emissions?|carbon|greenhouse|biodiversity|deforestation|rainfall'
+        r'|temperature|climate|drought|flood|adaptation|mitigation'
+        r'|emissões?|carbono|efeito estufa|biodiversidade|desmatamento|chuva'
+        r'|temperatura|clima|seca|inundação|adaptação|mitigação)\b',
+        re.IGNORECASE,
+    ),
+    "m-and-e": re.compile(
+        r'\b(indicator|target|baseline|milestone|output|outcome|result'
+        r'|monitoring|evaluation|assessment|KPI|benchmark'
+        r'|indicador|meta|linha de base|marco|produto|resultado'
+        r'|monitoramento|monitorização|avaliação|avaliação)\b',
+        re.IGNORECASE,
+    ),
+    "org": re.compile(
+        r'\b(staff turnover|employee satisfaction|organizational capacity'
+        r'|governance structure|board|management|HR|human resources'
+        r'|rotatividade|satisfação dos funcionários|capacidade organizacional'
+        r'|estrutura de governação|conselho|gestão|recursos humanos)\b',
+        re.IGNORECASE,
+    ),
+    "health": re.compile(
+        r'\b(HIV|PLHIV|prevalence|incidence|mortality|morbidity|treatment'
+        r'|antiretroviral|malaria|tuberculosis|TB|nutrition|maternal'
+        r'|child|adolescent|SRHR|reproductive|sexual health'
+        r'|VIH|SIDA|prevalência|incidência|mortalidade|tratamento'
+        r'|antirretroviral|malária|tuberculose|nutrição|saúde materna'
+        r'|criança|adolescente|saúde reprodutiva|saúde sexual)\b',
+        re.IGNORECASE,
+    ),
+}
+
+
+def _get_claim_patterns(domain: str) -> list:
+    """Return the list of claim-detection patterns for the given domain.
+
+    If domain is in _DOMAIN_PATTERNS, the domain-specific pattern is appended
+    to the base patterns. Unknown domains fall back to the base patterns only.
+    """
+    if domain in _DOMAIN_PATTERNS:
+        return _ALL_CLAIM_PATTERNS + [_DOMAIN_PATTERNS[domain]]
+    return _ALL_CLAIM_PATTERNS
+
 
 def _split_sentences(text: str) -> List[str]:
     """Split text into sentences, filtering out very short fragments."""
@@ -79,9 +140,17 @@ def _split_sentences(text: str) -> List[str]:
     return [s.strip() for s in sentences if len(s.strip()) >= 20]
 
 
-def _is_claim_sentence(sentence: str) -> bool:
-    """Return True if the sentence matches any claim-bearing pattern."""
-    return any(p.search(sentence) for p in _ALL_CLAIM_PATTERNS)
+def _is_claim_sentence(sentence: str, patterns: list = None) -> bool:
+    """Return True if the sentence matches any claim-bearing pattern.
+
+    Args:
+        sentence: The sentence to evaluate.
+        patterns: List of compiled regex patterns to use. Defaults to
+                  _ALL_CLAIM_PATTERNS for backward compatibility.
+    """
+    if patterns is None:
+        patterns = _ALL_CLAIM_PATTERNS
+    return any(p.search(sentence) for p in patterns)
 
 
 def _has_number(sentence: str) -> bool:
@@ -169,8 +238,9 @@ def verify_claims(
 
     Args:
         text: The text to analyse for unsupported claims.
-        domain: Thematic domain for context (not used for filtering; reserved
-                for future per-domain thresholds).
+        domain: Thematic domain for domain-specific claim pattern augmentation.
+                Valid values: "general", "finance", "governance", "climate",
+                "m-and-e", "org", "health". Unknown values fall back to general patterns.
         top_k_per_claim: Number of sources to retrieve per claim sentence.
         corroboration_threshold: Minimum score from any source to mark a
                                  claim as "verified" (default 0.65).
@@ -191,9 +261,10 @@ def verify_claims(
         return {"success": False, "error": "text cannot be empty"}
 
     top_k_per_claim = min(top_k_per_claim, 10)
+    claim_patterns = _get_claim_patterns(domain)
 
     sentences = _split_sentences(text)
-    claim_sentences = [s for s in sentences if _is_claim_sentence(s)]
+    claim_sentences = [s for s in sentences if _is_claim_sentence(s, patterns=claim_patterns)]
 
     if not claim_sentences:
         return {
@@ -203,6 +274,7 @@ def verify_claims(
             "total_claims": 0,
             "verified_count": 0,
             "claims": [],
+            "domain": domain,
             "note": "No claim-bearing sentences detected. No evidence verification was performed.",
         }
 
@@ -248,6 +320,7 @@ def verify_claims(
         "total_claims": total_claims,
         "verified_count": verified_count,
         "claims": claims_output,
+        "domain": domain,
     }
 
 

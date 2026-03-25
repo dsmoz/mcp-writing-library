@@ -611,7 +611,9 @@ def verify_claims(
 
     Args:
         text: The passage or document section to analyse
-        domain: Thematic domain for context (reserved for future use)
+        domain: Thematic domain for domain-specific claim pattern augmentation.
+                Valid values: "general", "finance", "governance", "climate",
+                "m-and-e", "org", "health". Unknown values fall back to general patterns.
         top_k_per_claim: Sources to retrieve per claim sentence (default 3, max 10)
         corroboration_threshold: Minimum score to mark a claim as verified (default 0.65)
 

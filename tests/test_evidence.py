@@ -345,3 +345,80 @@ def test_ghost_stat_flagged_for_bare_number():
     unverified = [c for c in result["claims"] if c["verdict"] == "unverified"]
     assert len(unverified) >= 1
     assert any(c["ghost_stat"] for c in unverified)
+
+
+# ---------------------------------------------------------------------------
+# Domain-aware claim pattern tests
+# ---------------------------------------------------------------------------
+
+def test_domain_health_detects_hiv_prevalence_sentence():
+    """With domain='health', 'HIV prevalence' sentence is still detected as a claim."""
+    with patch("src.tools.evidence._search_zotero", return_value=[]), \
+         patch("src.tools.evidence._search_cerebellum", return_value=[]):
+        from src.tools.evidence import verify_claims
+        result = verify_claims(
+            "HIV prevalence among adolescent girls has remained persistently high.",
+            domain="health",
+        )
+
+    assert result["success"] is True
+    assert result["total_claims"] >= 1
+
+
+def test_domain_finance_detects_budget_sentence():
+    """With domain='finance', 'budget allocation of USD 2 million' is detected as a claim."""
+    with patch("src.tools.evidence._search_zotero", return_value=[]), \
+         patch("src.tools.evidence._search_cerebellum", return_value=[]):
+        from src.tools.evidence import verify_claims
+        result = verify_claims(
+            "The budget allocation of USD 2 million was approved for the next fiscal year.",
+            domain="finance",
+        )
+
+    assert result["success"] is True
+    assert result["total_claims"] >= 1
+
+
+def test_domain_m_and_e_detects_indicator_sentence_no_number():
+    """With domain='m-and-e', an indicator sentence (no number, no epistemic verb) IS a claim.
+    With domain='general' the same sentence is NOT a claim.
+    """
+    from src.tools.evidence import _is_claim_sentence, _get_claim_patterns
+
+    sentence = "The indicator was not met during the reporting period."
+
+    # domain=general: should NOT detect as claim
+    general_patterns = _get_claim_patterns("general")
+    assert not _is_claim_sentence(sentence, patterns=general_patterns)
+
+    # domain=m-and-e: SHOULD detect as claim
+    mne_patterns = _get_claim_patterns("m-and-e")
+    assert _is_claim_sentence(sentence, patterns=mne_patterns)
+
+
+def test_verify_claims_returns_domain_key():
+    """Return dict from verify_claims() must include a 'domain' key."""
+    with patch("src.tools.evidence._search_zotero", return_value=[]), \
+         patch("src.tools.evidence._search_cerebellum", return_value=[]):
+        from src.tools.evidence import verify_claims
+
+        result_with_claims = verify_claims(
+            "HIV prevalence reached 12.5% in the region.",
+            domain="health",
+        )
+        assert "domain" in result_with_claims
+        assert result_with_claims["domain"] == "health"
+
+        result_no_claims = verify_claims(
+            "The programme was implemented by a dedicated team.",
+            domain="governance",
+        )
+        assert "domain" in result_no_claims
+        assert result_no_claims["domain"] == "governance"
+
+
+def test_domain_unknown_falls_back_to_general_patterns():
+    """Unknown domain values use only the base _ALL_CLAIM_PATTERNS."""
+    from src.tools.evidence import _get_claim_patterns, _ALL_CLAIM_PATTERNS
+    patterns = _get_claim_patterns("unknown-domain")
+    assert patterns == _ALL_CLAIM_PATTERNS
