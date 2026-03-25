@@ -738,6 +738,79 @@ def list_rubric_donors() -> dict:
 
 
 @mcp.tool()
+def add_template(
+    donor: str,
+    doc_type: str,
+    sections: List[dict],
+) -> dict:
+    """
+    Store a proposal template (list of required sections) for a donor and document type.
+
+    Use this to define the expected structure of a concept note, full proposal, or EOI
+    for a specific donor. Once stored, use check_structure() to verify a draft covers
+    all required sections.
+
+    Args:
+        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
+        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, general
+        sections: List of section dicts. Each must have:
+                  - name (str): Section name (e.g. "Executive Summary")
+                  - description (str): What this section should contain
+                  - required (bool, optional): Whether mandatory (default True)
+                  - order (int, optional): Expected position 1-based (default = list index + 1)
+
+    Returns:
+        {success, document_id, chunks_created, donor, doc_type, section_count} on success,
+        or {success: False, error} on invalid input
+    """
+    from src.tools.templates import add_template as _add
+    return _add(donor=donor, doc_type=doc_type, sections=sections)
+
+
+@mcp.tool()
+def check_structure(
+    text: str,
+    donor: str,
+    doc_type: str,
+) -> dict:
+    """
+    Check whether a document draft covers all required sections from the stored template.
+
+    Retrieves the stored template for the donor+doc_type pair and evaluates each section's
+    presence in the draft using semantic similarity (with keyword fallback).
+
+    Args:
+        text: The document draft text to check
+        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
+        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, general
+
+    Returns:
+        {success, donor, doc_type, template_document_id, total_sections, required_sections,
+         present_count, partial_count, missing_count, verdict, sections, missing_required}
+        verdict is "complete" (0 missing required) or "incomplete" (>0 missing required)
+        Each section entry includes: name, required, status (present|partial|missing), coverage_score
+    """
+    from src.tools.templates import check_structure as _check
+    return _check(text=text, donor=donor, doc_type=doc_type)
+
+
+@mcp.tool()
+def list_templates() -> dict:
+    """
+    Return all stored proposal templates.
+
+    Use this to see which donor+doc_type combinations have templates stored,
+    before calling check_structure().
+
+    Returns:
+        {success, templates: [{donor, doc_type, section_count, document_id}], total}
+        Sorted alphabetically by donor then doc_type.
+    """
+    from src.tools.templates import list_templates as _list
+    return _list()
+
+
+@mcp.tool()
 def score_ai_patterns(
     text: str,
     language: str = "auto",

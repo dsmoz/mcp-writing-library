@@ -1,0 +1,346 @@
+"""
+Proposal structure enforcement: store and check donor proposal templates.
+"""
+from typing import List
+from uuid import uuid4
+import structlog
+
+from src.tools.collections import get_collection_names
+
+logger = structlog.get_logger(__name__)
+
+VALID_DONORS = {"usaid", "undp", "global-fund", "eu", "general"}
+VALID_DOC_TYPES = {"concept-note", "full-proposal", "eoi", "annual-report", "general"}
+
+try:
+    from kbase.vector.sync_indexing import index_document
+    from kbase.vector.sync_search import semantic_search
+    from kbase.vector.sync_client import get_qdrant_client
+except ImportError:
+    index_document = None  # type: ignore
+    semantic_search = None  # type: ignore
+    get_qdrant_client = None  # type: ignore
+
+try:
+    from kbase.vector.sync_embeddings import generate_embedding as _generate_embedding
+    _embedding_available = True
+except ImportError:
+    _generate_embedding = None  # type: ignore
+    _embedding_available = False
+
+
+def _cosine(a: list, b: list) -> float:
+    """Compute cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x ** 2 for x in a) ** 0.5
+    nb = sum(x ** 2 for x in b) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _keyword_coverage(section_name: str, section_description: str, paragraph: str) -> float:
+    """
+    Fallback coverage scoring using keyword matching when embeddings are unavailable.
+    Returns a score 0.0–1.0 based on proportion of section name/description words found.
+    """
+    import re
+    para_lower = paragraph.lower()
+    # Tokenise section name and description
+    words = re.findall(r'\b[a-z]{3,}\b', (section_name + " " + section_description).lower())
+    # Remove very common stop words
+    stop = {"the", "and", "for", "this", "that", "with", "from", "are", "has", "have",
+            "been", "will", "its", "their", "each", "they", "what", "how", "all"}
+    words = [w for w in words if w not in stop]
+    if not words:
+        return 0.0
+    matches = sum(1 for w in words if w in para_lower)
+    return matches / len(words)
+
+
+def add_template(donor: str, doc_type: str, sections: list) -> dict:
+    """
+    Store a proposal template (list of required sections) for a donor+doc_type combination.
+
+    Args:
+        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
+        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, general
+        sections: List of section dicts. Each must have:
+                  - name (str): Section name
+                  - description (str): What this section should contain
+                  - required (bool, optional): Whether mandatory (default True)
+                  - order (int, optional): Expected position 1-based (default = list index + 1)
+
+    Returns:
+        {success, document_id, chunks_created, donor, doc_type, section_count} on success,
+        or {success: False, error} on invalid input
+    """
+    donor = donor.lower()
+    doc_type = doc_type.lower()
+
+    if donor not in VALID_DONORS:
+        return {
+            "success": False,
+            "error": f"Invalid donor '{donor}'. Must be one of: {sorted(VALID_DONORS)}",
+        }
+
+    if doc_type not in VALID_DOC_TYPES:
+        return {
+            "success": False,
+            "error": f"Invalid doc_type '{doc_type}'. Must be one of: {sorted(VALID_DOC_TYPES)}",
+        }
+
+    if not sections or not isinstance(sections, list):
+        return {"success": False, "error": "sections must be a non-empty list"}
+
+    # Validate and normalise each section
+    normalised = []
+    for i, sec in enumerate(sections):
+        if "name" not in sec:
+            return {"success": False, "error": f"Section at index {i} is missing required key 'name'"}
+        if "description" not in sec:
+            return {"success": False, "error": f"Section at index {i} is missing required key 'description'"}
+        normalised.append({
+            "name": sec["name"],
+            "description": sec["description"],
+            "required": sec.get("required", True),
+            "order": sec.get("order", i + 1),
+        })
+
+    if index_document is None:
+        return {"success": False, "error": "kbase library is not available"}
+
+    document_id = str(uuid4())
+    collection = get_collection_names()["templates"]
+    title = f"[{donor.upper()} | {doc_type}] Template"
+
+    # Concatenate section names + descriptions for embedding
+    content_parts = []
+    for sec in normalised:
+        content_parts.append(f"{sec['name']}: {sec['description']}")
+    content = "\n".join(content_parts)
+
+    metadata = {
+        "donor": donor,
+        "doc_type": doc_type,
+        "sections": normalised,
+        "section_count": len(normalised),
+        "entry_type": "template",
+    }
+
+    try:
+        point_ids = index_document(
+            collection_name=collection,
+            document_id=document_id,
+            title=title,
+            content=content,
+            metadata=metadata,
+            context_mode="metadata",
+        )
+        return {
+            "success": True,
+            "document_id": document_id,
+            "chunks_created": len(point_ids),
+            "donor": donor,
+            "doc_type": doc_type,
+            "section_count": len(normalised),
+        }
+    except Exception as e:
+        logger.error("Failed to add template", error=str(e))
+        return {"success": False, "error": str(e)}
+
+
+def check_structure(text: str, donor: str, doc_type: str) -> dict:
+    """
+    Check whether a document draft covers all required sections from the stored template.
+
+    Args:
+        text: The document draft text to check
+        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
+        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, general
+
+    Returns:
+        {success, donor, doc_type, template_document_id, total_sections, required_sections,
+         present_count, partial_count, missing_count, verdict, sections, missing_required}
+        verdict is "complete" (0 missing required) or "incomplete" (>0 missing required)
+    """
+    donor = donor.lower()
+    doc_type = doc_type.lower()
+
+    if donor not in VALID_DONORS:
+        return {
+            "success": False,
+            "error": f"Invalid donor '{donor}'. Must be one of: {sorted(VALID_DONORS)}",
+        }
+
+    if doc_type not in VALID_DOC_TYPES:
+        return {
+            "success": False,
+            "error": f"Invalid doc_type '{doc_type}'. Must be one of: {sorted(VALID_DOC_TYPES)}",
+        }
+
+    if semantic_search is None:
+        return {"success": False, "error": "kbase library is not available"}
+
+    collection = get_collection_names()["templates"]
+
+    # Retrieve the template
+    try:
+        raw_results = semantic_search(
+            collection_name=collection,
+            query=f"{donor} {doc_type} template",
+            limit=1,
+            filter_conditions={"donor": donor, "doc_type": doc_type},
+        )
+    except Exception as e:
+        logger.error("check_structure search failed", error=str(e))
+        return {"success": False, "error": str(e)}
+
+    if not raw_results:
+        return {
+            "success": False,
+            "error": f"No template found for donor '{donor}' doc_type '{doc_type}'",
+        }
+
+    template_result = raw_results[0]
+    template_doc_id = template_result.get("document_id", "")
+    metadata = template_result.get("metadata", {})
+    sections = metadata.get("sections", [])
+
+    # Split text into paragraphs
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if not paragraphs:
+        paragraphs = [text]
+
+    # Determine if embedding is available and working
+    use_embeddings = _embedding_available and _generate_embedding is not None
+
+    section_results = []
+    missing_required: List[str] = []
+    present_count = 0
+    partial_count = 0
+    missing_required_count = 0
+
+    for sec in sections:
+        sec_name = sec.get("name", "")
+        sec_desc = sec.get("description", "")
+        sec_required = sec.get("required", True)
+        query_text = f"{sec_name}: {sec_desc}"
+
+        # Compute coverage score across paragraphs
+        coverage_score = 0.0
+
+        if use_embeddings:
+            try:
+                sec_embedding = _generate_embedding(query_text)
+                para_scores = []
+                for para in paragraphs:
+                    try:
+                        para_embedding = _generate_embedding(para)
+                        sim = _cosine(sec_embedding, para_embedding)
+                        para_scores.append(sim)
+                    except Exception:
+                        # Embedding failed for this paragraph — skip
+                        pass
+                if para_scores:
+                    coverage_score = max(para_scores)
+                else:
+                    # All paragraph embeddings failed — fall back to keyword
+                    use_embeddings = False
+            except Exception:
+                # Section embedding failed — fall back to keyword
+                use_embeddings = False
+
+        if not use_embeddings:
+            # Keyword fallback: max keyword coverage across paragraphs
+            para_scores = [_keyword_coverage(sec_name, sec_desc, para) for para in paragraphs]
+            coverage_score = max(para_scores) if para_scores else 0.0
+
+        # Classify status
+        if coverage_score >= 0.55:
+            status = "present"
+            present_count += 1
+        elif coverage_score >= 0.35:
+            status = "partial"
+            partial_count += 1
+        else:
+            status = "missing"
+            if sec_required:
+                missing_required.append(sec_name)
+                missing_required_count += 1
+
+        section_results.append({
+            "name": sec_name,
+            "required": sec_required,
+            "status": status,
+            "coverage_score": round(coverage_score, 4),
+        })
+
+    required_sections = sum(1 for s in sections if s.get("required", True))
+    verdict = "complete" if missing_required_count == 0 else "incomplete"
+
+    return {
+        "success": True,
+        "donor": donor,
+        "doc_type": doc_type,
+        "template_document_id": template_doc_id,
+        "total_sections": len(sections),
+        "required_sections": required_sections,
+        "present_count": present_count,
+        "partial_count": partial_count,
+        "missing_count": missing_required_count,
+        "verdict": verdict,
+        "sections": section_results,
+        "missing_required": missing_required,
+    }
+
+
+def list_templates() -> dict:
+    """
+    Return all stored templates.
+
+    Returns:
+        {success, templates: [{donor, doc_type, section_count, document_id}], total}
+        Sorted by donor then doc_type.
+    """
+    if get_qdrant_client is None:
+        return {"success": False, "error": "kbase library is not available"}
+
+    collection = get_collection_names()["templates"]
+
+    try:
+        client = get_qdrant_client()
+        templates = []
+        offset = None
+
+        while True:
+            results, next_offset = client.scroll(
+                collection_name=collection,
+                limit=1000,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in results:
+                payload = point.payload or {}
+                if payload.get("entry_type") == "template":
+                    templates.append({
+                        "donor": payload.get("donor", ""),
+                        "doc_type": payload.get("doc_type", ""),
+                        "section_count": payload.get("section_count", 0),
+                        "document_id": payload.get("document_id", str(point.id)),
+                    })
+
+            if next_offset is None:
+                break
+            offset = next_offset
+
+        templates.sort(key=lambda x: (x["donor"], x["doc_type"]))
+
+        return {
+            "success": True,
+            "templates": templates,
+            "total": len(templates),
+        }
+
+    except Exception as e:
+        logger.error("list_templates failed", error=str(e))
+        return {"success": False, "error": str(e)}

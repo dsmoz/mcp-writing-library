@@ -19,6 +19,7 @@ def get_collection_names() -> dict:
         "terms": os.getenv("COLLECTION_TERMS", "writing_terms"),
         "style_profiles": os.getenv("COLLECTION_STYLE_PROFILES", "writing_style_profiles"),
         "rubrics": os.getenv("COLLECTION_RUBRICS", "writing_rubrics"),
+        "templates": os.getenv("COLLECTION_TEMPLATES", "writing_templates"),
     }
 
 
