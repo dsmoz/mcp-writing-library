@@ -20,6 +20,8 @@ Tools:
     add_rubric_criterion     — store a donor evaluation criterion
     score_against_rubric     — score proposal text against stored criteria
     list_rubric_donors       — list donors with stored rubric criteria
+    score_voice_consistency  — measure consistency of voice across sections
+    detect_authorship_shift  — flag segments deviating stylistically from the majority
 """
 from typing import Optional, List
 from mcp.server.fastmcp import FastMCP
@@ -871,6 +873,11 @@ def detect_authorship_shift(
             scoring_method (embedding | fallback)
         }
         Returns {success: False, error} if fewer than 3 segments found.
+
+    Note: Shift detection becomes statistically unreliable with fewer than 5 segments.
+    With exactly 3 segments, the 1.5×std threshold may exceed the maximum possible
+    deviation, causing real shifts to go undetected. Prefer 5+ segments for reliable
+    results.
     """
     from src.tools.consistency import detect_authorship_shift as _detect
     return _detect(text=text, min_segment_length=min_segment_length)

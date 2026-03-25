@@ -219,6 +219,11 @@ def detect_authorship_shift(
             shifted_segments: [{index, preview, deviation, z_score}],
             shift_detected, scoring_method
         }
+
+    Note: Shift detection becomes statistically unreliable with fewer than 5 segments.
+    With exactly 3 segments, the 1.5×std threshold may exceed the maximum possible
+    deviation, causing real shifts to go undetected. Prefer 5+ segments for reliable
+    results.
     """
     # Segment the text
     raw_segments = text.split("\n\n")
