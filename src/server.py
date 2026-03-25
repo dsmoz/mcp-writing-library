@@ -811,6 +811,72 @@ def list_templates() -> dict:
 
 
 @mcp.tool()
+def score_voice_consistency(
+    sections: List[str],
+    profile_name: Optional[str] = None,
+    top_k_profile: int = 1,
+) -> dict:
+    """
+    Measure how consistently a list of text sections share a voice/style.
+
+    Given 2–20 sections (e.g. proposal chapters written by different authors),
+    computes pairwise similarity between sections and optionally scores each
+    section against a saved style profile.
+
+    Args:
+        sections: List of text sections to compare (2–20 items required)
+        profile_name: Saved style profile name to compare against (e.g. "danilo-voice-pt").
+                      If omitted, sections are compared to each other only.
+        top_k_profile: How many top profile matches to return when profile_name is None (default 1).
+
+    Returns:
+        {
+            success, section_count,
+            inter_section_consistency (0–1, higher = more consistent),
+            consistency_verdict (consistent ≥0.7 | moderate 0.5–0.7 | inconsistent <0.5),
+            profile_name, profile_consistency (None if no profile),
+            profile_verdict (on-voice ≥0.65 | near-voice 0.45–0.65 | off-voice <0.45 | None),
+            sections: [{index, preview, drift_score, profile_score}],
+            highest_drift_section (index of most drifted section),
+            scoring_method (embedding | fallback)
+        }
+    """
+    from src.tools.consistency import score_voice_consistency as _score
+    return _score(sections=sections, profile_name=profile_name, top_k_profile=top_k_profile)
+
+
+@mcp.tool()
+def detect_authorship_shift(
+    text: str,
+    min_segment_length: int = 100,
+) -> dict:
+    """
+    Detect segments in a document that are stylistically different from the majority.
+
+    Splits the text on double newlines, embeds each segment, and flags segments
+    whose deviation from the centroid exceeds mean + 1.5 × std — indicating a
+    possible change of author or voice.
+
+    Requires at least 3 segments after filtering by min_segment_length.
+
+    Args:
+        text: Full document text to analyse
+        min_segment_length: Minimum characters per segment (default 100)
+
+    Returns:
+        {
+            success, total_segments, mean_deviation, std_deviation,
+            shifted_segments: [{index, preview, deviation, z_score}],
+            shift_detected (True if any shifted segments found),
+            scoring_method (embedding | fallback)
+        }
+        Returns {success: False, error} if fewer than 3 segments found.
+    """
+    from src.tools.consistency import detect_authorship_shift as _detect
+    return _detect(text=text, min_segment_length=min_segment_length)
+
+
+@mcp.tool()
 def score_ai_patterns(
     text: str,
     language: str = "auto",
