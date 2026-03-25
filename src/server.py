@@ -661,6 +661,80 @@ def score_evidence_density(text: str) -> dict:
 
 
 @mcp.tool()
+def add_rubric_criterion(
+    donor: str,
+    section: str,
+    criterion: str,
+    weight: float = 1.0,
+    red_flags: Optional[List[str]] = None,
+) -> dict:
+    """
+    Store a donor evaluation criterion in the rubric library.
+
+    Use this to build up a library of evaluation criteria per donor so that
+    proposal text can later be scored against them with score_against_rubric().
+
+    Args:
+        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
+        section: Proposal section name (e.g. "technical-approach", "sustainability", "m-and-e")
+        criterion: The criterion description (what evaluators look for)
+        weight: Relative importance 0.1–2.0 (default 1.0). Higher = more important criterion.
+        red_flags: Phrases or patterns that evaluators penalise (optional)
+
+    Returns:
+        {success, document_id, chunks_created, collection} on success,
+        or {success: False, error} on invalid donor or empty criterion
+    """
+    from src.tools.rubrics import add_rubric_criterion as _add
+    return _add(donor=donor, section=section, criterion=criterion, weight=weight, red_flags=red_flags)
+
+
+@mcp.tool()
+def score_against_rubric(
+    text: str,
+    donor: str,
+    section: Optional[str] = None,
+    top_k: int = 5,
+) -> dict:
+    """
+    Score a proposal text against stored evaluation criteria for a given donor.
+
+    Retrieves the most relevant criteria for the donor (and optionally section),
+    computes a weighted semantic similarity score, and returns a verdict.
+
+    Args:
+        text: Proposal text to score (a section or full document)
+        donor: Donor name to filter criteria — usaid|undp|global-fund|eu|general
+        section: Optional section filter (e.g. "technical-approach"). If omitted, all sections are used.
+        top_k: Number of criteria to match (default 5)
+
+    Returns:
+        {success, donor, section, text_length, criteria_matched, overall_score,
+         verdict (strong|adequate|weak), criteria: [...]}
+        Verdict: strong ≥0.7 | adequate 0.5–0.7 | weak <0.5
+        Returns {success: False, error} if donor invalid or no criteria found.
+    """
+    from src.tools.rubrics import score_against_rubric as _score
+    return _score(text=text, donor=donor, section=section, top_k=top_k)
+
+
+@mcp.tool()
+def list_rubric_donors() -> dict:
+    """
+    Return all donors that have at least one criterion stored in the rubric library.
+
+    Use this to see which donors are ready for rubric scoring before calling
+    score_against_rubric().
+
+    Returns:
+        {success, donors: [{donor, criterion_count}], total_donors, total_criteria}
+        Donors are sorted alphabetically.
+    """
+    from src.tools.rubrics import list_rubric_donors as _list
+    return _list()
+
+
+@mcp.tool()
 def score_ai_patterns(
     text: str,
     language: str = "auto",
