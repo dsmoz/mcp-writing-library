@@ -4,9 +4,13 @@ MCP Writing Library Server — FastMCP tool definitions.
 Tools:
     search_passages          — semantic search for exemplary writing passages
     add_passage              — store a new exemplary passage
+    delete_passage           — delete a passage by document_id
+    update_passage           — update fields of an existing passage
     list_styles              — list all valid writing style labels
     search_terms             — semantic search in terminology dictionary
     add_term                 — add a new terminology entry
+    delete_term              — delete a term by document_id
+    update_term              — update fields of an existing term
     get_library_stats        — collection point counts
     setup_collections        — create/verify Qdrant collections (admin)
     check_internal_similarity — detect similarity against library passages
@@ -171,6 +175,124 @@ def add_term(
     """
     from src.tools.terms import add_term as _add
     return _add(
+        preferred=preferred, avoid=avoid, domain=domain, language=language,
+        why=why, example_bad=example_bad, example_good=example_good,
+    )
+
+
+@mcp.tool()
+def delete_passage(document_id: str) -> dict:
+    """
+    Delete a passage from the writing library by document_id.
+
+    Use this to remove an outdated, duplicated, or incorrect passage.
+    The document_id is returned by add_passage or search_passages.
+
+    Args:
+        document_id: UUID of the passage to delete (from add_passage or search_passages)
+
+    Returns:
+        {success: True, document_id, deleted: True} on success,
+        or {success: False, error} if not found or deletion fails
+    """
+    from src.tools.passages import delete_passage as _delete
+    return _delete(document_id=document_id)
+
+
+@mcp.tool()
+def update_passage(
+    document_id: str,
+    text: Optional[str] = None,
+    doc_type: Optional[str] = None,
+    language: Optional[str] = None,
+    domain: Optional[str] = None,
+    quality_notes: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    source: Optional[str] = None,
+    style: Optional[List[str]] = None,
+) -> dict:
+    """
+    Update one or more fields of an existing passage.
+
+    Merges the provided fields with existing metadata and re-indexes.
+    At least one field must be supplied. Fields not provided remain unchanged.
+
+    Args:
+        document_id: UUID of the passage to update
+        text: Replacement passage text (re-embedds the document)
+        doc_type: New document type: executive-summary|concept-note|policy-brief|report|email|general
+        language: New language: en|pt
+        domain: New domain: srhr|governance|climate|general|m-and-e
+        quality_notes: Updated quality notes
+        tags: Replacement tag list (replaces, does not append)
+        source: Updated source reference
+        style: Replacement style label list. Call list_styles() to see valid values.
+
+    Returns:
+        {success: True, document_id, updated_fields: [...], chunks_created, warnings} on success,
+        or {success: False, error} on failure
+    """
+    from src.tools.passages import update_passage as _update
+    return _update(
+        document_id=document_id,
+        text=text, doc_type=doc_type, language=language, domain=domain,
+        quality_notes=quality_notes, tags=tags, source=source, style=style,
+    )
+
+
+@mcp.tool()
+def delete_term(document_id: str) -> dict:
+    """
+    Delete a terminology entry from the writing library by document_id.
+
+    Use this to remove a term that is no longer applicable or was added in error.
+    The document_id is returned by add_term or search_terms.
+
+    Args:
+        document_id: UUID of the term to delete (from add_term or search_terms)
+
+    Returns:
+        {success: True, document_id, deleted: True} on success,
+        or {success: False, error} if not found or deletion fails
+    """
+    from src.tools.terms import delete_term as _delete
+    return _delete(document_id=document_id)
+
+
+@mcp.tool()
+def update_term(
+    document_id: str,
+    preferred: Optional[str] = None,
+    avoid: Optional[str] = None,
+    domain: Optional[str] = None,
+    language: Optional[str] = None,
+    why: Optional[str] = None,
+    example_bad: Optional[str] = None,
+    example_good: Optional[str] = None,
+) -> dict:
+    """
+    Update one or more fields of an existing terminology entry.
+
+    Merges the provided fields with existing metadata and re-indexes.
+    At least one field must be supplied. Fields not provided remain unchanged.
+
+    Args:
+        document_id: UUID of the term to update
+        preferred: New preferred term
+        avoid: Updated term to avoid
+        domain: New domain: srhr|governance|climate|general|m-and-e
+        language: New language: en|pt|both
+        why: Updated rationale for preference
+        example_bad: Updated bad usage example
+        example_good: Updated good usage example
+
+    Returns:
+        {success: True, document_id, updated_fields: [...], chunks_created} on success,
+        or {success: False, error} on failure
+    """
+    from src.tools.terms import update_term as _update
+    return _update(
+        document_id=document_id,
         preferred=preferred, avoid=avoid, domain=domain, language=language,
         why=why, example_bad=example_bad, example_good=example_good,
     )

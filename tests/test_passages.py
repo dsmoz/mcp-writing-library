@@ -113,3 +113,134 @@ def test_search_passages_post_filters_by_style():
     assert result["success"] is True
     assert len(result["results"]) == 1
     assert "narrative" in result["results"][0]["style"]
+
+
+# --- delete_passage tests ---
+
+def test_delete_passage_success():
+    doc_id = str(uuid4())
+    with patch("src.tools.passages.check_document_indexed", return_value={"indexed": True, "chunk_count": 2}), \
+         patch("src.tools.passages.delete_document_vectors", return_value=2):
+        from src.tools.passages import delete_passage
+        result = delete_passage(document_id=doc_id)
+    assert result["success"] is True
+    assert result["document_id"] == doc_id
+    assert result["deleted"] is True
+
+
+def test_delete_passage_not_found():
+    doc_id = str(uuid4())
+    with patch("src.tools.passages.check_document_indexed", return_value={"indexed": False, "chunk_count": 0}):
+        from src.tools.passages import delete_passage
+        result = delete_passage(document_id=doc_id)
+    assert result["success"] is False
+    assert doc_id in result["error"]
+    assert "No passage found" in result["error"]
+
+
+def test_delete_passage_propagates_exception():
+    doc_id = str(uuid4())
+    with patch("src.tools.passages.check_document_indexed", side_effect=Exception("Qdrant connection refused")):
+        from src.tools.passages import delete_passage
+        result = delete_passage(document_id=doc_id)
+    assert result["success"] is False
+    assert "Qdrant connection refused" in result["error"]
+
+
+# --- update_passage tests ---
+
+def _make_mock_point(payload: dict):
+    """Return a minimal object mimicking a Qdrant ScrollResult point."""
+    from unittest.mock import MagicMock
+    point = MagicMock()
+    point.payload = payload
+    return point
+
+
+def test_update_passage_requires_at_least_one_field():
+    from src.tools.passages import update_passage
+    result = update_passage(document_id=str(uuid4()))
+    assert result["success"] is False
+    assert "At least one field" in result["error"]
+
+
+def test_update_passage_validates_doc_type():
+    from src.tools.passages import update_passage
+    result = update_passage(document_id=str(uuid4()), doc_type="invalid-type")
+    assert result["success"] is False
+    assert "doc_type" in result["error"].lower()
+
+
+def test_update_passage_validates_language():
+    from src.tools.passages import update_passage
+    result = update_passage(document_id=str(uuid4()), language="de")
+    assert result["success"] is False
+    assert "language" in result["error"].lower()
+
+
+def test_update_passage_not_found():
+    doc_id = str(uuid4())
+    mock_client = _make_mock_qdrant_client(scroll_result=([], None))
+    with patch("src.tools.passages.get_qdrant_client", return_value=mock_client):
+        from src.tools.passages import update_passage
+        result = update_passage(document_id=doc_id, quality_notes="updated notes")
+    assert result["success"] is False
+    assert "No passage found" in result["error"]
+
+
+def test_update_passage_success():
+    doc_id = str(uuid4())
+    existing_payload = {
+        "text": "Original text about the assessment.",
+        "doc_type": "report",
+        "language": "en",
+        "domain": "general",
+        "quality_notes": "old notes",
+        "tags": ["old-tag"],
+        "source": "manual",
+        "style": ["narrative"],
+    }
+    mock_point = _make_mock_point(existing_payload)
+    mock_client = _make_mock_qdrant_client(scroll_result=([mock_point], None))
+    mock_point_ids = [str(uuid4())]
+
+    with patch("src.tools.passages.get_qdrant_client", return_value=mock_client), \
+         patch("src.tools.passages.delete_document_vectors", return_value=2), \
+         patch("src.tools.passages.index_document", return_value=mock_point_ids):
+        from src.tools.passages import update_passage
+        result = update_passage(document_id=doc_id, quality_notes="better notes", domain="srhr")
+
+    assert result["success"] is True
+    assert result["document_id"] == doc_id
+    assert "quality_notes" in result["updated_fields"]
+    assert "domain" in result["updated_fields"]
+    assert result["chunks_created"] == 1
+
+
+def test_update_passage_warns_on_unknown_style():
+    doc_id = str(uuid4())
+    existing_payload = {
+        "text": "Some text.", "doc_type": "report", "language": "en",
+        "domain": "general", "quality_notes": "", "tags": [], "source": "manual", "style": [],
+    }
+    mock_point = _make_mock_point(existing_payload)
+    mock_client = _make_mock_qdrant_client(scroll_result=([mock_point], None))
+    mock_point_ids = [str(uuid4())]
+
+    with patch("src.tools.passages.get_qdrant_client", return_value=mock_client), \
+         patch("src.tools.passages.delete_document_vectors", return_value=1), \
+         patch("src.tools.passages.index_document", return_value=mock_point_ids):
+        from src.tools.passages import update_passage
+        result = update_passage(document_id=doc_id, style=["narrative", "unknown-style"])
+
+    assert result["success"] is True
+    assert len(result["warnings"]) == 1
+    assert "unknown-style" in result["warnings"][0]
+
+
+def _make_mock_qdrant_client(scroll_result):
+    """Helper to produce a mock Qdrant client with a configured scroll response."""
+    from unittest.mock import MagicMock
+    client = MagicMock()
+    client.scroll.return_value = scroll_result
+    return client
