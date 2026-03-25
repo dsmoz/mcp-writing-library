@@ -186,6 +186,196 @@ def seed():
                 },
             ],
         ),
+        # General — monitoring-report
+        dict(
+            donor="general",
+            doc_type="monitoring-report",
+            sections=[
+                {
+                    "name": "Executive Summary",
+                    "description": "Brief overview of reporting period, headline results, and key issues",
+                    "required": True,
+                    "order": 1,
+                },
+                {
+                    "name": "Context Update",
+                    "description": "Changes in the operating environment, risks materialised, and adaptations made",
+                    "required": False,
+                    "order": 2,
+                },
+                {
+                    "name": "Progress Against Results",
+                    "description": "Indicator-by-indicator progress table with actuals vs targets, disaggregated data, and variance explanations",
+                    "required": True,
+                    "order": 3,
+                },
+                {
+                    "name": "Activities Delivered",
+                    "description": "Summary of activities completed, beneficiaries reached, and implementation quality",
+                    "required": True,
+                    "order": 4,
+                },
+                {
+                    "name": "Financial Summary",
+                    "description": "Budget vs expenditure by cost category with utilisation rates and explanations",
+                    "required": True,
+                    "order": 5,
+                },
+                {
+                    "name": "Lessons Learned",
+                    "description": "What worked, what did not, and adaptations for the next period",
+                    "required": False,
+                    "order": 6,
+                },
+                {
+                    "name": "Next Period Plan",
+                    "description": "Planned activities and targets for the upcoming reporting period",
+                    "required": True,
+                    "order": 7,
+                },
+            ],
+        ),
+        # General — assessment
+        dict(
+            donor="general",
+            doc_type="assessment",
+            sections=[
+                {
+                    "name": "Introduction and Scope",
+                    "description": "Assessment objectives, methodology, data sources, and scope of work",
+                    "required": True,
+                    "order": 1,
+                },
+                {
+                    "name": "Context",
+                    "description": "Background information on the organisation, programme, or policy being assessed",
+                    "required": True,
+                    "order": 2,
+                },
+                {
+                    "name": "Findings",
+                    "description": "Evidence-based findings organised by assessment dimension or thematic area",
+                    "required": True,
+                    "order": 3,
+                },
+                {
+                    "name": "Analysis",
+                    "description": "Interpretation of findings against assessment criteria or standards",
+                    "required": True,
+                    "order": 4,
+                },
+                {
+                    "name": "Conclusions",
+                    "description": "Overall assessment verdict and key conclusions drawn from evidence",
+                    "required": True,
+                    "order": 5,
+                },
+                {
+                    "name": "Recommendations",
+                    "description": "Actionable recommendations with responsible parties, timelines, and priority levels",
+                    "required": True,
+                    "order": 6,
+                },
+            ],
+        ),
+        # General — tor (Terms of Reference)
+        dict(
+            donor="general",
+            doc_type="tor",
+            sections=[
+                {
+                    "name": "Background",
+                    "description": "Organisation or project context that makes this consultancy necessary",
+                    "required": True,
+                    "order": 1,
+                },
+                {
+                    "name": "Objectives",
+                    "description": "Specific objectives the consultancy is intended to achieve",
+                    "required": True,
+                    "order": 2,
+                },
+                {
+                    "name": "Scope of Work",
+                    "description": "Tasks, deliverables, and boundaries of the consultancy",
+                    "required": True,
+                    "order": 3,
+                },
+                {
+                    "name": "Methodology",
+                    "description": "Expected approach, data collection methods, and quality standards",
+                    "required": False,
+                    "order": 4,
+                },
+                {
+                    "name": "Deliverables",
+                    "description": "Specific outputs with format, quality standards, and submission deadlines",
+                    "required": True,
+                    "order": 5,
+                },
+                {
+                    "name": "Qualifications",
+                    "description": "Required expertise, experience, and competencies for the consultant",
+                    "required": True,
+                    "order": 6,
+                },
+                {
+                    "name": "Administrative Details",
+                    "description": "Duration, location, reporting line, budget envelope, and application instructions",
+                    "required": True,
+                    "order": 7,
+                },
+            ],
+        ),
+        # General — governance-review
+        dict(
+            donor="general",
+            doc_type="governance-review",
+            sections=[
+                {
+                    "name": "Scope and Methodology",
+                    "description": "What governance dimensions were reviewed, how evidence was collected, and limitations",
+                    "required": True,
+                    "order": 1,
+                },
+                {
+                    "name": "Governance Structure",
+                    "description": "Board composition, decision-making authority, committees, and reporting lines",
+                    "required": True,
+                    "order": 2,
+                },
+                {
+                    "name": "Financial Management",
+                    "description": "Financial controls, internal audit, external audit, and budget oversight mechanisms",
+                    "required": True,
+                    "order": 3,
+                },
+                {
+                    "name": "Human Resources",
+                    "description": "HR policies, staff structure, performance management, and safeguarding mechanisms",
+                    "required": False,
+                    "order": 4,
+                },
+                {
+                    "name": "Risk Management",
+                    "description": "Risk register, risk appetite statement, and evidence of risk monitoring",
+                    "required": True,
+                    "order": 5,
+                },
+                {
+                    "name": "Compliance",
+                    "description": "Legal registration, regulatory compliance, and policy adherence findings",
+                    "required": True,
+                    "order": 6,
+                },
+                {
+                    "name": "Recommendations",
+                    "description": "Prioritised governance improvement actions with responsible parties and timelines",
+                    "required": True,
+                    "order": 7,
+                },
+            ],
+        ),
     ]
 
     succeeded = 0
