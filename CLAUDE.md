@@ -1,17 +1,23 @@
 # CLAUDE.md — mcp-writing-library
 
-MCP server for writing passages and terminology dictionary with hybrid semantic search backed by Qdrant.
+MCP server for writing quality, evidence verification, and document intelligence. Backed by Qdrant hybrid search.
 
 ## Module Reference
 
 | Module | Functions | Description |
 |--------|-----------|-------------|
-| `src/tools/passages` | `add_passage`, `search_passages` | Store and retrieve exemplary writing passages |
-| `src/tools/terms` | `add_term`, `search_terms` | Store and retrieve terminology dictionary entries |
-| `src/tools/collections` | `get_collection_names`, `setup_collections`, `get_stats` | Manage Qdrant collections |
+| `src/tools/passages` | `add_passage`, `search_passages`, `update_passage`, `delete_passage`, `batch_add_passages` | Store and retrieve exemplary writing passages |
+| `src/tools/terms` | `add_term`, `search_terms`, `update_term`, `delete_term`, `batch_add_terms` | Store and retrieve terminology dictionary entries |
+| `src/tools/collections` | `get_collection_names`, `setup_collections`, `get_stats` | Manage Qdrant collections (5: passages, terms, style_profiles, rubrics, templates) |
+| `src/tools/export` | `export_library` | Export any collection to JSON or CSV |
 | `src/tools/styles` | `list_styles` | Writing style registry (14 labels across 4 categories) |
 | `src/tools/plagiarism` | `check_internal_similarity`, `check_external_similarity`, `score_external_similarity` | Similarity detection against library and web |
 | `src/tools/style_profiles` | `save_style_profile`, `load_style_profile`, `search_style_profiles` | Extract and retrieve writing style profiles from samples |
+| `src/tools/ai_patterns` | `score_ai_patterns` | Detect AI writing patterns; 10 rule-based detectors; calibrated by `doc_type` |
+| `src/tools/evidence` | `verify_claims`, `score_evidence_density` | Evidence hallucination detection via Zotero + Cerebellum; domain-aware claim patterns |
+| `src/tools/rubrics` | `add_rubric_criterion`, `score_against_rubric`, `list_rubric_donors` | Donor rubric alignment; USAID/UNDP/GF/EU/general criteria |
+| `src/tools/templates` | `add_template`, `check_structure`, `list_templates` | Document structure templates; detect present/missing sections |
+| `src/tools/consistency` | `score_voice_consistency`, `detect_authorship_shift` | Multi-author voice drift detection |
 
 ## Pattern 1 — Vocabulary Review
 
@@ -78,9 +84,60 @@ profile = load_style_profile(name="danilo-voice-pt")
 matches = search_style_profiles(text="The evidence is clear, but the politics are not.")
 ```
 
+## Pattern 5 — AI Pattern Scoring with doc_type
+
+Pass `doc_type` to calibrate paragraph-length and discursive-deficit thresholds:
+
+```python
+result = score_ai_patterns(
+    text="...",
+    language="auto",
+    doc_type="monitoring-report",  # relaxes paragraph limit to 7, discursive target to 0.5
+    # doc_type options: concept-note|full-proposal|eoi|executive-summary|general|
+    #                   annual-report|monitoring-report|financial-report|assessment|tor|governance-review
+)
+```
+
+## Pattern 6 — Evidence Verification
+
+```python
+result = verify_claims(
+    text="...",
+    domain="health",  # general|health|finance|governance|climate|m-and-e|org
+    top_k_per_claim=3,
+)
+# Returns: overall_evidence_score, verdict, per-claim verdicts, ghost_stat flags
+# ghost_stat: True = number with no source trail (always a blocker)
+```
+
+## Pattern 7 — Rubric Alignment
+
+```python
+result = score_against_rubric(
+    text="...",
+    donor="undp",       # usaid|undp|global-fund|eu|general
+    section="results-framework",  # optional filter
+    doc_context="annual report",  # optional context — not stored
+)
+# verdict: strong (≥0.7) | adequate (0.5–0.7) | weak (<0.5)
+```
+
+## Pattern 8 — Structure Check
+
+```python
+result = check_structure(
+    text="...",
+    donor="general",
+    doc_type="tor",  # concept-note|full-proposal|eoi|monitoring-report|assessment|tor|governance-review
+)
+# Returns per-section status: present|partial|missing
+```
+
 ## Common Pitfalls
 
 - **Collections must exist before indexing.** Run `setup_collections` once before
   first use; the seed script also calls it automatically.
 - **Qdrant env vars required.** Set `QDRANT_URL` and `QDRANT_API_KEY` in `.env.local`.
 - **`language` accepts `both` only for `add_term`.** For passages, use `en` or `pt`.
+- **`verify_claims` requires Zotero + Cerebellum reachable.** Returns empty sources lists (not an error) when they are unavailable; `ghost_stat` still works offline.
+- **Seed scripts must be run manually** to populate rubrics and templates collections: `python scripts/seed_rubrics.py` and `python scripts/seed_templates.py`.
