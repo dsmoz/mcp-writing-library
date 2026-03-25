@@ -114,9 +114,75 @@ def seed():
             weight=1.0,
             red_flags=["duplication", "no gap analysis"],
         ),
+        # M&E Report — quality criteria (donor="general", section="m-and-e-report")
+        dict(
+            donor="general",
+            section="m-and-e-report",
+            criterion="Indicator data is disaggregated by sex, age, geography, and key population group as applicable.",
+            weight=1.5,
+            red_flags=["aggregate only", "no disaggregation", "no sex-disaggregation"],
+        ),
+        dict(
+            donor="general",
+            section="m-and-e-report",
+            criterion="Actual results are compared to targets with a clear explanation of variances (exceeded, met, not met).",
+            weight=2.0,
+            red_flags=["no variance explanation", "missing targets", "results without targets"],
+        ),
+        dict(
+            donor="general",
+            section="m-and-e-report",
+            criterion="Data quality limitations are disclosed, including collection methodology and potential biases.",
+            weight=1.0,
+            red_flags=["no data quality note", "unqualified data"],
+        ),
+        # Governance Review — criteria (donor="general", section="governance-review")
+        dict(
+            donor="general",
+            section="governance-review",
+            criterion="Board composition and decision-making authority are clearly documented and separation of powers is evident.",
+            weight=1.5,
+            red_flags=["no board documentation", "unclear authority", "no separation of powers"],
+        ),
+        dict(
+            donor="general",
+            section="governance-review",
+            criterion="Financial oversight mechanisms include internal audit, external audit, and approval thresholds.",
+            weight=2.0,
+            red_flags=["no audit", "no financial controls", "unlimited spending authority"],
+        ),
+        dict(
+            donor="general",
+            section="governance-review",
+            criterion="Conflict of interest policy is documented and there is evidence of its application.",
+            weight=1.0,
+            red_flags=["no conflict of interest policy", "no evidence of enforcement"],
+        ),
+        # Financial Report — criteria (donor="general", section="financial-report")
+        dict(
+            donor="general",
+            section="financial-report",
+            criterion="Expenditure is reported against approved budget lines with percentage utilisation rates.",
+            weight=2.0,
+            red_flags=["no budget comparison", "missing utilisation rates"],
+        ),
+        dict(
+            donor="general",
+            section="financial-report",
+            criterion="Variances above 10% between budget and actuals are explained with justification and remediation plan.",
+            weight=1.5,
+            red_flags=["unexplained variance", "no justification for overspend"],
+        ),
+        dict(
+            donor="general",
+            section="financial-report",
+            criterion="Supporting documentation is referenced for all major expenditure categories.",
+            weight=1.0,
+            red_flags=["no receipts referenced", "no supporting documentation"],
+        ),
     ]
 
-    print(f"\nSeeding {len(criteria)} criteria across 4 donors...")
+    print(f"\nSeeding {len(criteria)} criteria (proposals + M&E reports + governance + financial)...")
     succeeded = 0
     failed = 0
 

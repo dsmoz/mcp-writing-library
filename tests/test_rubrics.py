@@ -194,6 +194,22 @@ def test_score_against_rubric_no_section_filter_omits_section_key():
     assert "section" not in call_kwargs["filter_conditions"]
 
 
+def test_score_against_rubric_doc_context_included_in_return():
+    mock_results = [
+        _make_search_result("Theory of change linking activities to outcomes.", score=0.8, weight=1.0),
+    ]
+    with patch("src.tools.rubrics.semantic_search", return_value=mock_results):
+        from src.tools.rubrics import score_against_rubric
+        result = score_against_rubric(
+            text="Our annual report narrative.",
+            donor="general",
+            doc_context="annual report",
+        )
+    assert result["success"] is True
+    assert "doc_context" in result
+    assert result["doc_context"] == "annual report"
+
+
 # ---------------------------------------------------------------------------
 # list_rubric_donors
 # ---------------------------------------------------------------------------

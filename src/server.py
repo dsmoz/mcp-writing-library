@@ -705,6 +705,7 @@ def score_against_rubric(
     donor: str,
     section: Optional[str] = None,
     top_k: int = 5,
+    doc_context: Optional[str] = None,
 ) -> dict:
     """
     Score a document section against stored evaluation criteria for a given donor or evaluator.
@@ -713,19 +714,20 @@ def score_against_rubric(
     computes a weighted semantic similarity score, and returns a verdict.
 
     Args:
-        text: Document text to score (a section or full document)
+        text: Document section to score
         donor: Donor name to filter criteria — usaid|undp|global-fund|eu|general
         section: Optional section filter (e.g. "technical-approach"). If omitted, all sections are used.
         top_k: Number of criteria to match (default 5)
+        doc_context: Optional free-text context about the document type (e.g. "annual report", "financial audit"). Not stored — informational only.
 
     Returns:
         {success, donor, section, text_length, criteria_matched, overall_score,
-         verdict (strong|adequate|weak), criteria: [...]}
+         verdict (strong|adequate|weak), criteria: [...], doc_context}
         Verdict: strong ≥0.7 | adequate 0.5–0.7 | weak <0.5
         Returns {success: False, error} if donor invalid or no criteria found.
     """
     from src.tools.rubrics import score_against_rubric as _score
-    return _score(text=text, donor=donor, section=section, top_k=top_k)
+    return _score(text=text, donor=donor, section=section, top_k=top_k, doc_context=doc_context)
 
 
 @mcp.tool()

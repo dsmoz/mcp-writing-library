@@ -1,5 +1,5 @@
 """
-Donor rubric alignment checker: store and score proposal text against donor evaluation criteria.
+Rubric alignment checker: store and score document sections against evaluation criteria.
 """
 from typing import Optional, List
 from uuid import uuid4
@@ -33,7 +33,7 @@ def add_rubric_criterion(
 
     Args:
         donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
-        section: Proposal section name (e.g. "technical-approach", "sustainability")
+        section: Section name (e.g. 'technical-approach', 'financial-management', 'methodology')
         criterion: The criterion description (what evaluators look for)
         weight: Relative importance 0.1–2.0 (default 1.0)
         red_flags: Phrases/patterns evaluators penalise (optional)
@@ -96,20 +96,25 @@ def score_against_rubric(
     donor: str,
     section: Optional[str] = None,
     top_k: int = 5,
+    doc_context: str = None,
 ) -> dict:
     """
-    Score a proposal text against all stored criteria for a given donor.
+    Score a document section against all stored criteria for a given donor.
 
     Args:
-        text: Proposal text to score
+        text: Document section to score
         donor: Donor name to filter criteria
         section: Optional section filter (e.g. "technical-approach")
         top_k: Number of criteria to match (default 5)
+        doc_context: Optional free-text context about the document type (e.g. "annual report").
+            Not stored — informational only.
 
     Returns:
         {success, donor, section, text_length, criteria_matched, overall_score,
-         verdict, criteria} on success
+         verdict, criteria, doc_context} on success
     """
+    if doc_context:
+        logger.debug("score_against_rubric context", doc_context=doc_context)
     donor = donor.lower()
     if donor not in VALID_DONORS:
         return {
@@ -186,6 +191,7 @@ def score_against_rubric(
         "overall_score": overall_score,
         "verdict": verdict,
         "criteria": criteria,
+        "doc_context": doc_context,
     }
 
 
