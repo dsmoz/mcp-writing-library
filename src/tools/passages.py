@@ -22,12 +22,16 @@ try:
     from kbase.vector.sync_indexing import index_document, delete_document_vectors, check_document_indexed
     from kbase.vector.sync_search import semantic_search
     from kbase.vector.sync_client import get_qdrant_client
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
 except ImportError:
     index_document = None  # type: ignore
     delete_document_vectors = None  # type: ignore
     check_document_indexed = None  # type: ignore
     semantic_search = None  # type: ignore
     get_qdrant_client = None  # type: ignore
+    Filter = None  # type: ignore
+    FieldCondition = None  # type: ignore
+    MatchValue = None  # type: ignore
 
 
 def add_passage(
@@ -211,13 +215,16 @@ def update_passage(
             "success": False,
             "error": f"Invalid language '{language}'. Must be one of: {sorted(VALID_LANGUAGES)}",
         }
+    if domain is not None and domain not in VALID_DOMAINS:
+        return {
+            "success": False,
+            "error": f"Invalid domain '{domain}'. Must be one of: {sorted(VALID_DOMAINS)}",
+        }
 
     collection = get_collection_names()["passages"]
 
     try:
         # Fetch current document to merge metadata
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
-
         client = get_qdrant_client()
         filter_condition = Filter(
             must=[FieldCondition(key="document_id", match=MatchValue(value=str(document_id)))]
@@ -249,7 +256,9 @@ def update_passage(
         if not merged_text or not merged_text.strip():
             return {"success": False, "error": "text cannot be empty"}
 
-        # Delete old vectors
+        # NOTE: This operation is non-atomic. If re-indexing fails after deletion,
+        # the document will be lost. The original payload is preserved below and
+        # included in the error response so the caller can recover.
         delete_document_vectors(collection_name=collection, document_id=document_id)
 
         # Re-index with same document_id using add_passage logic
@@ -274,14 +283,27 @@ def update_passage(
             "style": style_list,
         }
 
-        point_ids = index_document(
-            collection_name=collection,
-            document_id=document_id,
-            title=title,
-            content=merged_text,
-            metadata=metadata,
-            context_mode="metadata",
-        )
+        try:
+            point_ids = index_document(
+                collection_name=collection,
+                document_id=document_id,
+                title=title,
+                content=merged_text,
+                metadata=metadata,
+                context_mode="metadata",
+            )
+        except Exception as index_error:
+            logger.error(
+                "Re-index failed after deletion",
+                error=str(index_error),
+                document_id=document_id,
+            )
+            return {
+                "success": False,
+                "error": f"Re-index failed after deletion: {index_error}. Original payload preserved for recovery.",
+                "document_id": document_id,
+                "original_payload": existing_payload,
+            }
 
         return {
             "success": True,

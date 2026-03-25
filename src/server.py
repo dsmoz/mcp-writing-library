@@ -219,7 +219,7 @@ def update_passage(
 
     Args:
         document_id: UUID of the passage to update
-        text: Replacement passage text (re-embedds the document)
+        text: Replacement passage text (re-embeds the document)
         doc_type: New document type: executive-summary|concept-note|policy-brief|report|email|general
         language: New language: en|pt
         domain: New domain: srhr|governance|climate|general|m-and-e

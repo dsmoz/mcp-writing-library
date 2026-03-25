@@ -1,7 +1,8 @@
 """Tests for passages tool."""
-import pytest
 from unittest.mock import patch
 from uuid import uuid4
+
+from tests.conftest import _make_mock_point, _make_mock_qdrant_client
 
 
 def test_add_passage_returns_document_id():
@@ -149,14 +150,6 @@ def test_delete_passage_propagates_exception():
 
 # --- update_passage tests ---
 
-def _make_mock_point(payload: dict):
-    """Return a minimal object mimicking a Qdrant ScrollResult point."""
-    from unittest.mock import MagicMock
-    point = MagicMock()
-    point.payload = payload
-    return point
-
-
 def test_update_passage_requires_at_least_one_field():
     from src.tools.passages import update_passage
     result = update_passage(document_id=str(uuid4()))
@@ -178,10 +171,20 @@ def test_update_passage_validates_language():
     assert "language" in result["error"].lower()
 
 
+def test_update_passage_validates_domain():
+    from src.tools.passages import update_passage
+    result = update_passage(document_id=str(uuid4()), domain="invalid-domain")
+    assert result["success"] is False
+    assert "domain" in result["error"].lower()
+
+
 def test_update_passage_not_found():
     doc_id = str(uuid4())
     mock_client = _make_mock_qdrant_client(scroll_result=([], None))
-    with patch("src.tools.passages.get_qdrant_client", return_value=mock_client):
+    with patch("src.tools.passages.get_qdrant_client", return_value=mock_client), \
+         patch("src.tools.passages.Filter"), \
+         patch("src.tools.passages.FieldCondition"), \
+         patch("src.tools.passages.MatchValue"):
         from src.tools.passages import update_passage
         result = update_passage(document_id=doc_id, quality_notes="updated notes")
     assert result["success"] is False
@@ -206,7 +209,10 @@ def test_update_passage_success():
 
     with patch("src.tools.passages.get_qdrant_client", return_value=mock_client), \
          patch("src.tools.passages.delete_document_vectors", return_value=2), \
-         patch("src.tools.passages.index_document", return_value=mock_point_ids):
+         patch("src.tools.passages.index_document", return_value=mock_point_ids), \
+         patch("src.tools.passages.Filter"), \
+         patch("src.tools.passages.FieldCondition"), \
+         patch("src.tools.passages.MatchValue"):
         from src.tools.passages import update_passage
         result = update_passage(document_id=doc_id, quality_notes="better notes", domain="srhr")
 
@@ -229,18 +235,13 @@ def test_update_passage_warns_on_unknown_style():
 
     with patch("src.tools.passages.get_qdrant_client", return_value=mock_client), \
          patch("src.tools.passages.delete_document_vectors", return_value=1), \
-         patch("src.tools.passages.index_document", return_value=mock_point_ids):
+         patch("src.tools.passages.index_document", return_value=mock_point_ids), \
+         patch("src.tools.passages.Filter"), \
+         patch("src.tools.passages.FieldCondition"), \
+         patch("src.tools.passages.MatchValue"):
         from src.tools.passages import update_passage
         result = update_passage(document_id=doc_id, style=["narrative", "unknown-style"])
 
     assert result["success"] is True
     assert len(result["warnings"]) == 1
     assert "unknown-style" in result["warnings"][0]
-
-
-def _make_mock_qdrant_client(scroll_result):
-    """Helper to produce a mock Qdrant client with a configured scroll response."""
-    from unittest.mock import MagicMock
-    client = MagicMock()
-    client.scroll.return_value = scroll_result
-    return client

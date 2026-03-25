@@ -17,12 +17,16 @@ try:
     from kbase.vector.sync_indexing import index_document, delete_document_vectors, check_document_indexed
     from kbase.vector.sync_search import semantic_search
     from kbase.vector.sync_client import get_qdrant_client
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
 except ImportError:
     index_document = None  # type: ignore
     delete_document_vectors = None  # type: ignore
     check_document_indexed = None  # type: ignore
     semantic_search = None  # type: ignore
     get_qdrant_client = None  # type: ignore
+    Filter = None  # type: ignore
+    FieldCondition = None  # type: ignore
+    MatchValue = None  # type: ignore
 
 
 def add_term(
@@ -189,8 +193,6 @@ def update_term(
     collection = get_collection_names()["terms"]
 
     try:
-        from qdrant_client.models import Filter, FieldCondition, MatchValue
-
         client = get_qdrant_client()
         filter_condition = Filter(
             must=[FieldCondition(key="document_id", match=MatchValue(value=str(document_id)))]
@@ -221,7 +223,9 @@ def update_term(
         if not merged_preferred or not merged_preferred.strip():
             return {"success": False, "error": "preferred term cannot be empty"}
 
-        # Delete old vectors
+        # NOTE: This operation is non-atomic. If re-indexing fails after deletion,
+        # the document will be lost. The original payload is preserved below and
+        # included in the error response so the caller can recover.
         delete_document_vectors(collection_name=collection, document_id=document_id)
 
         # Re-index with same document_id using add_term logic
@@ -247,14 +251,27 @@ def update_term(
             "entry_type": "term",
         }
 
-        point_ids = index_document(
-            collection_name=collection,
-            document_id=document_id,
-            title=merged_preferred,
-            content=content,
-            metadata=metadata,
-            context_mode="metadata",
-        )
+        try:
+            point_ids = index_document(
+                collection_name=collection,
+                document_id=document_id,
+                title=merged_preferred,
+                content=content,
+                metadata=metadata,
+                context_mode="metadata",
+            )
+        except Exception as index_error:
+            logger.error(
+                "Re-index failed after deletion",
+                error=str(index_error),
+                document_id=document_id,
+            )
+            return {
+                "success": False,
+                "error": f"Re-index failed after deletion: {index_error}. Original payload preserved for recovery.",
+                "document_id": document_id,
+                "original_payload": existing_payload,
+            }
 
         return {
             "success": True,
