@@ -17,6 +17,9 @@ Tools:
     check_external_similarity — detect similarity against web content (Tavily)
     score_external_similarity — score pre-fetched search results for similarity
     score_ai_patterns        — score text against known AI writing patterns
+    add_rubric_criterion     — store a donor evaluation criterion
+    score_against_rubric     — score proposal text against stored criteria
+    list_rubric_donors       — list donors with stored rubric criteria
 """
 from typing import Optional, List
 from mcp.server.fastmcp import FastMCP
@@ -559,7 +562,7 @@ def export_library(collection: str, output_format: str = "json") -> dict:
     another environment.
 
     Args:
-        collection: Logical alias — "passages", "terms", or "style_profiles" —
+        collection: Logical alias — "passages", "terms", "style_profiles", or "rubrics" —
                     or the literal Qdrant collection name.
         output_format: Output format: "json" (default) or "csv".
                        CSV stringifies list/dict fields automatically.

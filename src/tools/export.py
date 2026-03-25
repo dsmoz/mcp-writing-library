@@ -33,7 +33,7 @@ def export_library(collection: str, output_format: str = "json") -> dict:
     Scrolls the entire collection in batches and returns payloads as JSON or CSV.
 
     Args:
-        collection: Logical alias ("passages", "terms", "style_profiles") or
+        collection: Logical alias ("passages", "terms", "style_profiles", "rubrics") or
                     the literal Qdrant collection name.
         output_format: Output format — "json" (default) or "csv".
 

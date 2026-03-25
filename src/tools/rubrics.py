@@ -145,7 +145,8 @@ def score_against_rubric(
         }
 
     criteria = []
-    weighted_scores = []
+    raw_scores = []
+    weights = []
 
     for result in raw_results:
         meta = result.get("metadata", {})
@@ -162,9 +163,11 @@ def score_against_rubric(
             "red_flags": meta.get("red_flags", []),
             "document_id": result.get("document_id", ""),
         })
-        weighted_scores.append(weighted_score)
+        raw_scores.append(raw_score)
+        weights.append(weight)
 
-    overall_score = sum(weighted_scores) / len(weighted_scores) if weighted_scores else 0.0
+    # Weighted average: sum(raw_score * weight) / sum(weights)
+    overall_score = sum(s * w for s, w in zip(raw_scores, weights)) / sum(weights) if weights else 0.0
     overall_score = round(overall_score, 4)
 
     if overall_score >= 0.7:

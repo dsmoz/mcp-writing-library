@@ -132,8 +132,8 @@ def test_score_against_rubric_success_with_weighted_scores():
     assert result["success"] is True
     assert result["donor"] == "usaid"
     assert result["criteria_matched"] == 2
-    # weighted scores: 0.8*1.5=1.2, 0.6*1.0=0.6; mean = 0.9
-    assert result["overall_score"] == round((0.8 * 1.5 + 0.6 * 1.0) / 2, 4)
+    # weighted average: (0.8*1.5 + 0.6*1.0) / (1.5 + 1.0) = 1.8 / 2.5 = 0.72
+    assert result["overall_score"] == round((0.8 * 1.5 + 0.6 * 1.0) / (1.5 + 1.0), 4)
     assert result["verdict"] == "strong"
     assert len(result["criteria"]) == 2
     assert result["criteria"][0]["weighted_score"] == round(0.8 * 1.5, 4)
