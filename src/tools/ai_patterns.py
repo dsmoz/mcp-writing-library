@@ -352,7 +352,7 @@ def _detect_passive_voice(text: str) -> Tuple[float, List[dict]]:
     return round(score, 3), findings if passive_ratio > 0.25 else []
 
 
-def _detect_paragraph_length(text: str, max_sentences: int = 5) -> Tuple[float, List[dict]]:
+def _detect_paragraph_length(text: str, max_sentences: int = _PARA_LIMITS["general"]) -> Tuple[float, List[dict]]:
     """Detect paragraphs exceeding max_sentences sentences."""
     paragraphs = _split_paragraphs(text)
     findings = []
@@ -372,7 +372,7 @@ def _detect_paragraph_length(text: str, max_sentences: int = 5) -> Tuple[float, 
     return round(score, 3), findings
 
 
-def _detect_discursive_deficit(text: str, target: float = 1.0) -> Tuple[float, List[dict]]:
+def _detect_discursive_deficit(text: str, target: float = _DISCURSIVE_TARGETS["general"]) -> Tuple[float, List[dict]]:
     """Detect fewer than target discursive expressions per ~300-word page."""
     if target == 0.0:
         return 0.0, []
