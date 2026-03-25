@@ -888,6 +888,7 @@ def score_ai_patterns(
     text: str,
     language: str = "auto",
     threshold: float = 0.25,
+    doc_type: str = "general",
 ) -> dict:
     """
     Score text against known AI writing patterns.
@@ -902,8 +903,8 @@ def score_ai_patterns(
         em_dash_intercalation — Paired em-dashes used as parenthetical inserts (AI pattern)
         sentence_monotony     — 3+ consecutive sentences of similar length (±3 words)
         passive_voice         — High passive voice density (>25% of sentences)
-        paragraph_length      — Paragraphs exceeding 4 sentences (UNDP standard)
-        discursive_deficit    — Fewer than 2 discursive expressions per ~300 words
+        paragraph_length      — Paragraphs exceeding configurable per doc_type (default: 5)
+        discursive_deficit    — Fewer than configurable per doc_type (default: 1.0/page) discursive expressions
         mechanical_listing    — Paragraph openers: Firstly, Secondly, Thirdly, Finally
         generic_closings      — "In conclusion, this report has shown...", etc.
 
@@ -911,11 +912,14 @@ def score_ai_patterns(
         text: The text to score (full document or section)
         language: "en", "pt", or "auto" (default: auto-detect)
         threshold: Per-category score above which a category is flagged (default: 0.25)
+        doc_type: Document type for threshold calibration. One of: concept-note, full-proposal,
+                  eoi, executive-summary, general, annual-report, monitoring-report, financial-report,
+                  assessment, tor, governance-review. Default: "general".
 
     Returns:
         dict with overall_score, verdict (clean|review|ai-sounding), per-category
-        scores and findings with exact excerpts, summary, word_count, page_equivalent.
+        scores and findings with exact excerpts, summary, word_count, page_equivalent, doc_type.
         Verdict thresholds: clean <0.25 | review 0.25–0.55 | ai-sounding ≥0.55
     """
     from src.tools.ai_patterns import score_ai_patterns as _score
-    return _score(text=text, language=language, threshold=threshold)
+    return _score(text=text, language=language, threshold=threshold, doc_type=doc_type)

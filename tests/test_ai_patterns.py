@@ -273,7 +273,7 @@ def test_verdict_field_present():
 def test_return_structure_complete():
     result = score_ai_patterns(CLEAN_TEXT)
     assert result["success"] is True
-    required_keys = {"language", "overall_score", "verdict", "threshold", "categories", "summary", "word_count", "page_equivalent"}
+    required_keys = {"language", "overall_score", "verdict", "threshold", "doc_type", "categories", "summary", "word_count", "page_equivalent"}
     assert required_keys.issubset(result.keys())
     # All 10 categories present
     expected_categories = {
@@ -282,3 +282,64 @@ def test_return_structure_complete():
         "paragraph_length", "discursive_deficit", "mechanical_listing", "generic_closings",
     }
     assert expected_categories == set(result["categories"].keys())
+
+
+# ---------------------------------------------------------------------------
+# doc_type threshold calibration
+# ---------------------------------------------------------------------------
+
+def test_financial_report_doc_type_no_discursive_deficit():
+    # Plain factual text with no discursive expressions — financial-report should score 0.0
+    plain = (
+        "The programme reached 3,400 people in 2024. Testing uptake rose 34%. "
+        "Community workers delivered sessions in five districts. Supply issues "
+        "affected Q3. The supervision model was monthly. All targets were met. " * 6
+    )
+    result = score_ai_patterns(plain, doc_type="financial-report")
+    assert result["success"] is True
+    assert result["doc_type"] == "financial-report"
+    cat = result["categories"]["discursive_deficit"]
+    assert cat["score"] == 0.0
+    assert cat["findings"] == []
+
+
+def test_monitoring_report_allows_seven_sentence_paragraphs():
+    # One paragraph with exactly 7 sentences — should NOT be flagged for monitoring-report (limit=7)
+    text = (
+        "The programme exceeded its targets in 2024. "
+        "Community workers delivered peer-led sessions. "
+        "Testing uptake rose by 34 percent. "
+        "Supply disruptions were resolved by Q4. "
+        "The supervision model proved effective. "
+        "All six districts reported positive outcomes. "
+        "Data quality checks passed at all sites."
+    )
+    result = score_ai_patterns(text, doc_type="monitoring-report")
+    assert result["success"] is True
+    assert result["doc_type"] == "monitoring-report"
+    cat = result["categories"]["paragraph_length"]
+    assert cat["score"] == 0.0
+    assert cat["findings"] == []
+
+
+def test_concept_note_flags_five_sentence_paragraph():
+    # One paragraph with 5 sentences — should be flagged for concept-note (limit=4)
+    text = (
+        "The programme exceeded its targets in 2024. "
+        "Community workers delivered peer-led sessions. "
+        "Testing uptake rose by 34 percent. "
+        "Supply disruptions were resolved by Q4. "
+        "All six districts reported positive outcomes."
+    )
+    result = score_ai_patterns(text, doc_type="concept-note")
+    assert result["success"] is True
+    assert result["doc_type"] == "concept-note"
+    cat = result["categories"]["paragraph_length"]
+    assert cat["score"] > 0
+    assert len(cat["findings"]) > 0
+
+
+def test_invalid_doc_type_returns_error():
+    result = score_ai_patterns("Some text.", doc_type="brochure")
+    assert result["success"] is False
+    assert "doc_type" in result["error"].lower() or "brochure" in result["error"]

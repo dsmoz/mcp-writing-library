@@ -13,8 +13,8 @@ Categories detected:
     em_dash_intercalation — Paired em-dashes as parenthetical inserts (AI pattern in PT)
     sentence_monotony     — 3+ consecutive sentences of similar length (±3 words)
     passive_voice         — High density of passive constructions (>25% of sentences)
-    paragraph_length      — Paragraphs exceeding 4 sentences (UNDP standard)
-    discursive_deficit    — Fewer than 2 discursive expressions per ~300 words
+    paragraph_length      — Paragraphs exceeding configurable per doc_type (default: 5) sentences
+    discursive_deficit    — Fewer than configurable per doc_type (default: 1.0/page) discursive expressions
     mechanical_listing    — Paragraph openers: Firstly, Secondly, Thirdly, Finally
     generic_closings      — "In conclusion, this report has shown...", "To summarise..."
 """
@@ -138,6 +138,36 @@ _PT_FUNCTION_WORDS = {
     "que", "uma", "para", "com", "por", "são", "também", "mais", "sobre",
     "como", "mas", "dos", "das", "nos", "nas", "quando", "porque", "entre",
     "seus", "suas", "este", "esta", "estes", "estas", "isso", "essa",
+}
+
+# Max sentences per paragraph before flagging, keyed by doc_type
+_PARA_LIMITS = {
+    "concept-note": 4,
+    "full-proposal": 4,
+    "eoi": 4,
+    "executive-summary": 3,
+    "general": 5,
+    "annual-report": 6,
+    "monitoring-report": 7,
+    "financial-report": 8,
+    "assessment": 7,
+    "tor": 6,
+    "governance-review": 6,
+}
+
+# Required discursive expressions per 300-word page, keyed by doc_type
+_DISCURSIVE_TARGETS = {
+    "concept-note": 2.0,
+    "full-proposal": 2.0,
+    "eoi": 1.5,
+    "executive-summary": 2.0,
+    "general": 1.0,
+    "annual-report": 1.0,
+    "monitoring-report": 0.5,
+    "financial-report": 0.0,
+    "assessment": 1.0,
+    "tor": 0.5,
+    "governance-review": 1.0,
 }
 
 
@@ -322,15 +352,15 @@ def _detect_passive_voice(text: str) -> Tuple[float, List[dict]]:
     return round(score, 3), findings if passive_ratio > 0.25 else []
 
 
-def _detect_paragraph_length(text: str) -> Tuple[float, List[dict]]:
-    """Detect paragraphs exceeding 4 sentences (UNDP standard)."""
+def _detect_paragraph_length(text: str, max_sentences: int = 5) -> Tuple[float, List[dict]]:
+    """Detect paragraphs exceeding max_sentences sentences."""
     paragraphs = _split_paragraphs(text)
     findings = []
     violation_count = 0
 
     for para in paragraphs:
         sentences = _split_sentences(para)
-        if len(sentences) > 4:
+        if len(sentences) > max_sentences:
             violation_count += 1
             findings.append({
                 "excerpt": para[:200] + "...",
@@ -342,8 +372,11 @@ def _detect_paragraph_length(text: str) -> Tuple[float, List[dict]]:
     return round(score, 3), findings
 
 
-def _detect_discursive_deficit(text: str) -> Tuple[float, List[dict]]:
-    """Detect fewer than 2 discursive expressions per ~300-word page."""
+def _detect_discursive_deficit(text: str, target: float = 1.0) -> Tuple[float, List[dict]]:
+    """Detect fewer than target discursive expressions per ~300-word page."""
+    if target == 0.0:
+        return 0.0, []
+
     lower = text.lower()
     word_count = len(text.split())
     pages = max(word_count / 300, 1)
@@ -354,7 +387,6 @@ def _detect_discursive_deficit(text: str) -> Tuple[float, List[dict]]:
             hit_count += 1
 
     density = hit_count / pages
-    target = 2.0
 
     if density >= target:
         return 0.0, []
@@ -418,6 +450,7 @@ def score_ai_patterns(
     text: str,
     language: str = "auto",
     threshold: float = 0.25,
+    doc_type: str = "general",
 ) -> dict:
     """
     Score text against known AI writing patterns.
@@ -426,10 +459,14 @@ def score_ai_patterns(
         text: The text to score (full document or section)
         language: "en", "pt", or "auto" (auto-detects; default: "auto")
         threshold: Per-category score above which a category is flagged (default: 0.25)
+        doc_type: Document type for threshold calibration. One of: concept-note,
+                  full-proposal, eoi, executive-summary, general, annual-report,
+                  monitoring-report, financial-report, assessment, tor,
+                  governance-review. Default: "general".
 
     Returns:
         dict with overall_score, verdict, per-category scores and findings,
-        summary, word_count, page_equivalent.
+        summary, word_count, page_equivalent, doc_type.
         Verdict: "clean" (<0.25), "review" (0.25–0.55), "ai-sounding" (≥0.55)
     """
     if not text or not text.strip():
@@ -438,10 +475,17 @@ def score_ai_patterns(
     if language not in ("en", "pt", "auto"):
         return {"success": False, "error": f"Invalid language '{language}'. Must be 'en', 'pt', or 'auto'."}
 
+    if doc_type not in _PARA_LIMITS:
+        valid = ", ".join(sorted(_PARA_LIMITS.keys()))
+        return {"success": False, "error": f"Invalid doc_type '{doc_type}'. Must be one of: {valid}."}
+
     detected_language = _detect_language(text) if language == "auto" else language
 
     word_count = len(text.split())
     page_equivalent = round(word_count / 300, 1)
+
+    para_limit = _PARA_LIMITS.get(doc_type, 5)
+    discursive_target = _DISCURSIVE_TARGETS.get(doc_type, 1.0)
 
     try:
         # Run all detectors
@@ -451,8 +495,8 @@ def score_ai_patterns(
         em_dash_score, em_dash_findings = _detect_em_dash_intercalation(text)
         monotony_score, monotony_findings = _detect_sentence_monotony(text)
         passive_score, passive_findings = _detect_passive_voice(text)
-        para_len_score, para_len_findings = _detect_paragraph_length(text)
-        discursive_score, discursive_findings = _detect_discursive_deficit(text)
+        para_len_score, para_len_findings = _detect_paragraph_length(text, max_sentences=para_limit)
+        discursive_score, discursive_findings = _detect_discursive_deficit(text, target=discursive_target)
         listing_score, listing_findings = _detect_mechanical_listing(text)
         closing_score, closing_findings = _detect_generic_closings(text)
 
@@ -491,6 +535,7 @@ def score_ai_patterns(
             "overall_score": overall_score,
             "verdict": verdict,
             "threshold": threshold,
+            "doc_type": doc_type,
             "categories": categories,
             "summary": summary,
             "word_count": word_count,
