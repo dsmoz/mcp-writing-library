@@ -149,10 +149,10 @@ def test_verify_claims_graceful_when_both_sources_fail():
 
 
 # ---------------------------------------------------------------------------
-# verify_claims — no claims found → overall_evidence_score = 1.0
+# verify_claims — no claims found → distinct "no_claims_detected" verdict
 # ---------------------------------------------------------------------------
 
-def test_verify_claims_no_claims_returns_perfect_score():
+def test_verify_claims_no_claims_returns_no_claims_detected():
     from src.tools.evidence import verify_claims
     # Plain prose with no claim patterns
     result = verify_claims(
@@ -162,9 +162,10 @@ def test_verify_claims_no_claims_returns_perfect_score():
 
     assert result["success"] is True
     assert result["total_claims"] == 0
-    assert result["overall_evidence_score"] == 1.0
-    assert result["verdict"] == "evidenced"
+    assert result["overall_evidence_score"] is None
+    assert result["verdict"] == "no_claims_detected"
     assert result["claims"] == []
+    assert "note" in result
 
 
 # ---------------------------------------------------------------------------
@@ -273,3 +274,74 @@ def test_score_evidence_density_counts_numeric_citations():
     result = score_evidence_density(text)
     assert result["success"] is True
     assert result["cited_sentences"] >= 2
+
+
+# ---------------------------------------------------------------------------
+# Portuguese pattern detection
+# ---------------------------------------------------------------------------
+
+def test_is_claim_sentence_portuguese_epistemic():
+    from src.tools.evidence import _is_claim_sentence
+    assert _is_claim_sentence(
+        "Os dados mostram que a prevalência do VIH aumentou em Moçambique."
+    )
+    assert _is_claim_sentence(
+        "Segundo o MISAU, a mortalidade materna continua elevada nas zonas rurais."
+    )
+    assert _is_claim_sentence(
+        "A investigação sugere que as intervenções comunitárias são mais eficazes."
+    )
+    assert _is_claim_sentence(
+        "De acordo com os estudos recentes, os jovens são mais vulneráveis."
+    )
+
+
+def test_is_claim_sentence_portuguese_prevalence():
+    from src.tools.evidence import _is_claim_sentence
+    assert _is_claim_sentence(
+        "A prevalência do VIH entre populações-chave excede 10% em Moçambique."
+    )
+    assert _is_claim_sentence(
+        "A mortalidade materna em Moçambique permanece entre as mais altas da região."
+    )
+    assert _is_claim_sentence(
+        "Na África Austral, a prevalência do HIV entre adolescentes preocupa os especialistas."
+    )
+
+
+# ---------------------------------------------------------------------------
+# ghost_stat for bare large numbers (Issue 3)
+# ---------------------------------------------------------------------------
+
+def test_has_number_matches_bare_large_numbers():
+    from src.tools.evidence import _has_number
+    # 4+ digit numbers
+    assert _has_number("The programme reached 35000 beneficiaries across the district.")
+    assert _has_number("There were 1,234 participants enrolled in the study.")
+    # 3-digit numbers
+    assert _has_number("Some 150 communities participated in the baseline survey.")
+    # Still matches percentages
+    assert _has_number("HIV prevalence reached 12.5% among adults.")
+
+
+def test_has_number_does_not_flag_single_digits():
+    from src.tools.evidence import _has_number
+    # Single digits should not trigger (too common, not a "stat")
+    assert not _has_number("There are 5 key partners involved in the project.")
+    assert not _has_number("The team has 3 staff members.")
+
+
+def test_ghost_stat_flagged_for_bare_number():
+    """Unverified claim with a bare large number should set ghost_stat=True."""
+    from unittest.mock import patch
+    with patch("src.tools.evidence._search_zotero", return_value=[]), \
+         patch("src.tools.evidence._search_cerebellum", return_value=[]):
+        from src.tools.evidence import verify_claims
+        result = verify_claims(
+            "The programme reached 35000 beneficiaries in the northern provinces."
+        )
+
+    assert result["success"] is True
+    unverified = [c for c in result["claims"] if c["verdict"] == "unverified"]
+    assert len(unverified) >= 1
+    assert any(c["ghost_stat"] for c in unverified)

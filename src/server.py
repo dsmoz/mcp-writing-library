@@ -595,9 +595,11 @@ def verify_claims(
         - Country/prevalence terms (in Mozambique, HIV prevalence, PLHIV…)
 
     Verdict thresholds:
-        evidenced  — ≥80% of claims corroborated
-        mixed      — 40–80% of claims corroborated
-        unverified — <40% of claims corroborated
+        evidenced          — ≥80% of claims corroborated
+        mixed              — 40–80% of claims corroborated
+        unverified         — <40% of claims corroborated
+        no_claims_detected — no claim-bearing sentences found; overall_evidence_score
+                             is None and no verification was performed
 
     Ghost stats are unverified claim sentences that contain a number or
     percentage with no supporting source — high-risk hallucination candidates.
@@ -605,11 +607,11 @@ def verify_claims(
     Args:
         text: The passage or document section to analyse
         domain: Thematic domain for context (reserved for future use)
-        top_k_per_claim: Sources to retrieve per claim sentence (default 3)
+        top_k_per_claim: Sources to retrieve per claim sentence (default 3, max 10)
         corroboration_threshold: Minimum score to mark a claim as verified (default 0.65)
 
     Returns:
-        overall_evidence_score (0–1), verdict (evidenced|mixed|unverified),
+        overall_evidence_score (0–1 or None), verdict (evidenced|mixed|unverified|no_claims_detected),
         total_claims, verified_count, and per-claim results with source attribution
         and ghost_stat flag. Degrades gracefully if Zotero or Cerebellum is unavailable.
     """

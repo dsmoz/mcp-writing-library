@@ -4,6 +4,7 @@ Evidence hallucination detection tools.
 Provides claim extraction, corroboration search against Zotero and Cerebellum
 knowledge bases, and evidence density scoring without external search.
 """
+import os
 import re
 import sys
 from typing import List
@@ -13,18 +14,31 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
+# Cross-server path constants
+# ---------------------------------------------------------------------------
+
+_ZOTERO_PATH = "/Users/danilodasilva/Documents/Programming/mcp-servers/mcp-zotero-qdrant"
+_CEREBELLUM_PATH = "/Users/danilodasilva/Documents/Programming/mcp-servers/mcp-cerebellum"
+
+# ---------------------------------------------------------------------------
 # Claim-detection regex patterns
 # ---------------------------------------------------------------------------
 
 _PATTERN_NUMBERS = re.compile(
-    r'\b\d[\d,\.]*\s*(%|percent|per cent|pct)(?!\w)',
+    r'\b\d{2,}[\d,\.]*\s*(%|percent|per cent|pct)?\b',
     re.IGNORECASE,
 )
 
 _PATTERN_EPISTEMIC = re.compile(
     r'\b(shows? that|indicates? that|demonstrates? that|evidence suggests?'
     r'|data (reveals?|shows?)|according to'
-    r'|research (shows?|finds?|suggests?))\b',
+    r'|research (shows?|finds?|suggests?))\b'
+    # Portuguese epistemic verbs
+    r'|os dados (mostram|indicam|revelam|sugerem)'
+    r'|a (evidência|investigação|pesquisa) (sugere|indica|mostra|revela)'
+    r'|segundo (os dados|o relatório|o MISAU|a OMS|a ONUSIDA|os estudos)'
+    r'|de acordo com'
+    r'|estudos (mostram|indicam|sugerem|revelam)',
     re.IGNORECASE,
 )
 
@@ -39,7 +53,12 @@ _PATTERN_CITATION_NUMERIC = re.compile(
 _PATTERN_PREVALENCE = re.compile(
     r'\b(in Mozambique|in Angola|in SADC|among key populations?'
     r'|HIV prevalence|maternal mortality|under-five mortality'
-    r'|adolescent|PLHIV)\b',
+    r'|adolescent|PLHIV'
+    # Portuguese prevalence/country terms
+    r'|prevalência do (VIH|SIDA|HIV|malária|tuberculose)'
+    r'|mortalidade (materna|infantil|neonatal)'
+    r'|entre (populações-chave|adolescentes|jovens|mulheres)'
+    r'|em Moçambique|em Angola|na África Austral|na SADC)\b',
     re.IGNORECASE,
 )
 
@@ -82,14 +101,16 @@ def _has_citation(sentence: str) -> bool:
 def _search_zotero(query: str, top_k: int) -> List[dict]:
     """Search the Zotero knowledge base. Returns empty list on any failure."""
     try:
-        sys.path.insert(0, "/Users/danilodasilva/Documents/Programming/mcp-servers/mcp-zotero-qdrant")
+        if _ZOTERO_PATH not in sys.path:
+            sys.path.insert(0, _ZOTERO_PATH)
         from src.qdrant.search import SemanticSearch  # type: ignore
     except Exception as exc:
         logger.warning("Zotero import failed — skipping", error=str(exc))
         return []
 
     try:
-        results = SemanticSearch(query=query, top_k=top_k)
+        collection_name = os.getenv("ZOTERO_QDRANT_COLLECTION", "zotero_hybrid")
+        results = SemanticSearch(query=query, top_k=top_k, collection_name=collection_name)
         normalised = []
         for r in results:
             normalised.append({
@@ -108,7 +129,8 @@ def _search_zotero(query: str, top_k: int) -> List[dict]:
 def _search_cerebellum(query: str, top_k: int) -> List[dict]:
     """Search the Cerebellum knowledge base. Returns empty list on any failure."""
     try:
-        sys.path.insert(0, "/Users/danilodasilva/Documents/Programming/mcp-servers/mcp-cerebellum")
+        if _CEREBELLUM_PATH not in sys.path:
+            sys.path.insert(0, _CEREBELLUM_PATH)
         from tools.search import global_search  # type: ignore
     except Exception as exc:
         logger.warning("Cerebellum import failed — skipping", error=str(exc))
@@ -156,9 +178,19 @@ def verify_claims(
     Returns:
         dict with overall_evidence_score, verdict, per-claim results, and
         ghost_stat flags for unverified numeric claims.
+
+        Possible verdict values:
+          - "evidenced": >= 80% of claims are verified.
+          - "mixed": 40–79% of claims are verified.
+          - "unverified": < 40% of claims are verified.
+          - "no_claims_detected": no claim-bearing sentences were found;
+            no evidence verification was performed (overall_evidence_score
+            is None in this case).
     """
     if not text or not text.strip():
         return {"success": False, "error": "text cannot be empty"}
+
+    top_k_per_claim = min(top_k_per_claim, 10)
 
     sentences = _split_sentences(text)
     claim_sentences = [s for s in sentences if _is_claim_sentence(s)]
@@ -166,11 +198,12 @@ def verify_claims(
     if not claim_sentences:
         return {
             "success": True,
-            "overall_evidence_score": 1.0,
-            "verdict": "evidenced",
+            "overall_evidence_score": None,
+            "verdict": "no_claims_detected",
             "total_claims": 0,
             "verified_count": 0,
             "claims": [],
+            "note": "No claim-bearing sentences detected. No evidence verification was performed.",
         }
 
     claims_output = []
