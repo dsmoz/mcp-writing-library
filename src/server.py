@@ -510,7 +510,7 @@ def score_external_similarity(
 
 
 @mcp.tool()
-def batch_add_passages(items: list) -> dict:
+def batch_add_passages(items: list[dict]) -> dict:
     """
     Add multiple writing passages in a single call.
 
@@ -530,7 +530,7 @@ def batch_add_passages(items: list) -> dict:
 
 
 @mcp.tool()
-def batch_add_terms(items: list) -> dict:
+def batch_add_terms(items: list[dict]) -> dict:
     """
     Add multiple terminology entries in a single call.
 
@@ -550,7 +550,7 @@ def batch_add_terms(items: list) -> dict:
 
 
 @mcp.tool()
-def export_library(collection: str, format: str = "json") -> dict:
+def export_library(collection: str, output_format: str = "json") -> dict:
     """
     Export all points from a writing library collection.
 
@@ -561,8 +561,8 @@ def export_library(collection: str, format: str = "json") -> dict:
     Args:
         collection: Logical alias — "passages", "terms", or "style_profiles" —
                     or the literal Qdrant collection name.
-        format: Output format: "json" (default) or "csv".
-                CSV stringifies list/dict fields automatically.
+        output_format: Output format: "json" (default) or "csv".
+                       CSV stringifies list/dict fields automatically.
 
     Returns:
         {success, collection, count, format, data} on success,
@@ -570,7 +570,7 @@ def export_library(collection: str, format: str = "json") -> dict:
         On failure: {success: False, error}.
     """
     from src.tools.export import export_library as _export
-    return _export(collection=collection, format=format)
+    return _export(collection=collection, output_format=output_format)
 
 
 @mcp.tool()

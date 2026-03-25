@@ -23,7 +23,7 @@ def get_collection_names() -> dict:
 
 def setup_collections() -> dict:
     """
-    Ensure both Qdrant collections exist with hybrid vector config.
+    Ensure all Qdrant collections exist with hybrid vector config.
     Returns dict with creation status for each collection.
     """
     from kbase.vector.sync_indexing import ensure_collection

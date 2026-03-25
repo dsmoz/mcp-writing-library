@@ -14,8 +14,6 @@ try:
 except ImportError:
     get_qdrant_client = None  # type: ignore
 
-_VALID_ALIASES = ("passages", "terms", "style_profiles")
-
 
 def _resolve_collection(collection: str) -> str | None:
     """Return the Qdrant collection name for a logical alias or literal name."""
@@ -28,7 +26,7 @@ def _resolve_collection(collection: str) -> str | None:
     return None
 
 
-def export_library(collection: str, format: str = "json") -> dict:
+def export_library(collection: str, output_format: str = "json") -> dict:
     """
     Export all points from a writing library collection.
 
@@ -37,12 +35,15 @@ def export_library(collection: str, format: str = "json") -> dict:
     Args:
         collection: Logical alias ("passages", "terms", "style_profiles") or
                     the literal Qdrant collection name.
-        format: Output format — "json" (default) or "csv".
+        output_format: Output format — "json" (default) or "csv".
 
     Returns:
         {success, collection, count, format, data} on success,
         or {success: False, error} on failure.
     """
+    if get_qdrant_client is None:
+        return {"success": False, "error": "kbase library is not available"}
+
     collection_name = _resolve_collection(collection)
     if collection_name is None:
         names = get_collection_names()
@@ -55,10 +56,10 @@ def export_library(collection: str, format: str = "json") -> dict:
             ),
         }
 
-    if format not in ("json", "csv"):
+    if output_format not in ("json", "csv"):
         return {
             "success": False,
-            "error": f"Invalid format '{format}'. Must be 'json' or 'csv'.",
+            "error": f"Invalid format '{output_format}'. Must be 'json' or 'csv'.",
         }
 
     try:
@@ -83,7 +84,7 @@ def export_library(collection: str, format: str = "json") -> dict:
 
         count = len(payloads)
 
-        if format == "json":
+        if output_format == "json":
             return {
                 "success": True,
                 "collection": collection_name,

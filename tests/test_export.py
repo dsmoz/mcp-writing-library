@@ -40,7 +40,7 @@ def test_export_library_json_passages():
              "style_profiles": "writing_style_profiles",
          }):
         from src.tools.export import export_library
-        result = export_library(collection="passages", format="json")
+        result = export_library(collection="passages", output_format="json")
 
     assert result["success"] is True
     assert result["count"] == 2
@@ -60,7 +60,7 @@ def test_export_library_json_terms():
              "style_profiles": "writing_style_profiles",
          }):
         from src.tools.export import export_library
-        result = export_library(collection="terms", format="json")
+        result = export_library(collection="terms", output_format="json")
 
     assert result["success"] is True
     assert result["count"] == 1
@@ -78,7 +78,7 @@ def test_export_library_json_style_profiles():
              "style_profiles": "writing_style_profiles",
          }):
         from src.tools.export import export_library
-        result = export_library(collection="style_profiles", format="json")
+        result = export_library(collection="style_profiles", output_format="json")
 
     assert result["success"] is True
     assert result["collection"] == "writing_style_profiles"
@@ -95,7 +95,7 @@ def test_export_library_accepts_literal_collection_name():
              "style_profiles": "writing_style_profiles",
          }):
         from src.tools.export import export_library
-        result = export_library(collection="writing_passages", format="json")
+        result = export_library(collection="writing_passages", output_format="json")
 
     assert result["success"] is True
     assert result["collection"] == "writing_passages"
@@ -113,7 +113,7 @@ def test_export_library_paginates_multiple_pages():
              "style_profiles": "writing_style_profiles",
          }):
         from src.tools.export import export_library
-        result = export_library(collection="passages", format="json")
+        result = export_library(collection="passages", output_format="json")
 
     assert result["success"] is True
     assert result["count"] == 5
@@ -137,7 +137,7 @@ def test_export_library_csv_returns_string():
              "style_profiles": "writing_style_profiles",
          }):
         from src.tools.export import export_library
-        result = export_library(collection="passages", format="csv")
+        result = export_library(collection="passages", output_format="csv")
 
     assert result["success"] is True
     assert result["format"] == "csv"
@@ -160,7 +160,7 @@ def test_export_library_csv_empty_collection():
              "style_profiles": "writing_style_profiles",
          }):
         from src.tools.export import export_library
-        result = export_library(collection="passages", format="csv")
+        result = export_library(collection="passages", output_format="csv")
 
     assert result["success"] is True
     assert result["count"] == 0
@@ -172,7 +172,8 @@ def test_export_library_csv_empty_collection():
 # ---------------------------------------------------------------------------
 
 def test_export_library_unknown_collection():
-    with patch("src.tools.export.get_collection_names", return_value={
+    with patch("src.tools.export.get_qdrant_client", return_value=MagicMock()), \
+         patch("src.tools.export.get_collection_names", return_value={
         "passages": "writing_passages",
         "terms": "writing_terms",
         "style_profiles": "writing_style_profiles",
@@ -186,13 +187,14 @@ def test_export_library_unknown_collection():
 
 
 def test_export_library_invalid_format():
-    with patch("src.tools.export.get_collection_names", return_value={
+    with patch("src.tools.export.get_qdrant_client", return_value=MagicMock()), \
+         patch("src.tools.export.get_collection_names", return_value={
         "passages": "writing_passages",
         "terms": "writing_terms",
         "style_profiles": "writing_style_profiles",
     }):
         from src.tools.export import export_library
-        result = export_library(collection="passages", format="xml")
+        result = export_library(collection="passages", output_format="xml")
 
     assert result["success"] is False
     assert "xml" in result["error"]
@@ -209,7 +211,7 @@ def test_export_library_scroll_exception_returns_error():
              "style_profiles": "writing_style_profiles",
          }):
         from src.tools.export import export_library
-        result = export_library(collection="passages", format="json")
+        result = export_library(collection="passages", output_format="json")
 
     assert result["success"] is False
     assert "Qdrant connection refused" in result["error"]
