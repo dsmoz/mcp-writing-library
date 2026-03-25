@@ -574,6 +574,91 @@ def export_library(collection: str, output_format: str = "json") -> dict:
 
 
 @mcp.tool()
+def verify_claims(
+    text: str,
+    domain: str = "general",
+    top_k_per_claim: int = 3,
+    corroboration_threshold: float = 0.65,
+) -> dict:
+    """
+    Detect potential hallucinations by verifying claim-bearing sentences against
+    Zotero and Cerebellum knowledge bases.
+
+    Extracts sentences that contain statistics, causal assertions, epistemic
+    verbs, citation placeholders, or country/prevalence keywords, then searches
+    both knowledge bases for corroborating sources.
+
+    Claim patterns detected:
+        - Numbers and percentages (e.g. "12.5%", "45 percent")
+        - Epistemic/causal verbs (shows that, indicates that, evidence suggests…)
+        - APA citations (Author Year) or numeric citations [N]
+        - Country/prevalence terms (in Mozambique, HIV prevalence, PLHIV…)
+
+    Verdict thresholds:
+        evidenced  — ≥80% of claims corroborated
+        mixed      — 40–80% of claims corroborated
+        unverified — <40% of claims corroborated
+
+    Ghost stats are unverified claim sentences that contain a number or
+    percentage with no supporting source — high-risk hallucination candidates.
+
+    Args:
+        text: The passage or document section to analyse
+        domain: Thematic domain for context (reserved for future use)
+        top_k_per_claim: Sources to retrieve per claim sentence (default 3)
+        corroboration_threshold: Minimum score to mark a claim as verified (default 0.65)
+
+    Returns:
+        overall_evidence_score (0–1), verdict (evidenced|mixed|unverified),
+        total_claims, verified_count, and per-claim results with source attribution
+        and ghost_stat flag. Degrades gracefully if Zotero or Cerebellum is unavailable.
+    """
+    from src.tools.evidence import verify_claims as _verify
+    return _verify(
+        text=text,
+        domain=domain,
+        top_k_per_claim=top_k_per_claim,
+        corroboration_threshold=corroboration_threshold,
+    )
+
+
+@mcp.tool()
+def score_evidence_density(text: str) -> dict:
+    """
+    Analyse the ratio of cited claim sentences to total claim sentences,
+    without calling any external search APIs.
+
+    Use this for a fast, offline check of how well-evidenced a document is
+    before running the more thorough verify_claims tool.
+
+    Claim detection uses the same patterns as verify_claims:
+        - Numbers and percentages
+        - Epistemic verbs and causal assertions
+        - APA or numeric citation markers
+        - Country/prevalence keywords
+
+    Citation detection looks for explicit markers:
+        - APA style: (Author, YYYY) or (Author et al. YYYY)
+        - Numeric style: [N]
+
+    Verdict thresholds:
+        well-evidenced        — cited/claims ≥ 0.6
+        partially-evidenced   — cited/claims 0.3–0.6
+        under-evidenced       — cited/claims < 0.3
+
+    Args:
+        text: The passage or document section to analyse
+
+    Returns:
+        total_sentences, claim_sentences, cited_sentences, evidence_density (0–1),
+        verdict (well-evidenced|partially-evidenced|under-evidenced), and
+        a recommendation string with actionable guidance.
+    """
+    from src.tools.evidence import score_evidence_density as _score
+    return _score(text=text)
+
+
+@mcp.tool()
 def score_ai_patterns(
     text: str,
     language: str = "auto",
