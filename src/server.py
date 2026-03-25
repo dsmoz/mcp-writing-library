@@ -510,6 +510,70 @@ def score_external_similarity(
 
 
 @mcp.tool()
+def batch_add_passages(items: list) -> dict:
+    """
+    Add multiple writing passages in a single call.
+
+    Calls add_passage() for each item. Never raises — errors are collected per item.
+    Items missing the required 'text' field are recorded as failed.
+
+    Args:
+        items: List of passage dicts. Each dict supports the same fields as
+               add_passage(): text (required), doc_type, language, domain,
+               quality_notes, tags, source, style.
+
+    Returns:
+        {success: True, total, succeeded, failed, results: [per-item result with index]}
+    """
+    from src.tools.passages import batch_add_passages as _batch
+    return _batch(items=items)
+
+
+@mcp.tool()
+def batch_add_terms(items: list) -> dict:
+    """
+    Add multiple terminology entries in a single call.
+
+    Calls add_term() for each item. Never raises — errors are collected per item.
+    Items missing the required 'preferred' field are recorded as failed.
+
+    Args:
+        items: List of term dicts. Each dict supports the same fields as
+               add_term(): preferred (required), avoid, domain, language,
+               why, example_bad, example_good.
+
+    Returns:
+        {success: True, total, succeeded, failed, results: [per-item result with index]}
+    """
+    from src.tools.terms import batch_add_terms as _batch
+    return _batch(items=items)
+
+
+@mcp.tool()
+def export_library(collection: str, format: str = "json") -> dict:
+    """
+    Export all points from a writing library collection.
+
+    Scrolls the entire Qdrant collection in batches of 1000 and returns
+    all payloads as JSON or CSV. Useful for backups, audits, or seeding
+    another environment.
+
+    Args:
+        collection: Logical alias — "passages", "terms", or "style_profiles" —
+                    or the literal Qdrant collection name.
+        format: Output format: "json" (default) or "csv".
+                CSV stringifies list/dict fields automatically.
+
+    Returns:
+        {success, collection, count, format, data} on success,
+        where data is a list (json) or a CSV string (csv).
+        On failure: {success: False, error}.
+    """
+    from src.tools.export import export_library as _export
+    return _export(collection=collection, format=format)
+
+
+@mcp.tool()
 def score_ai_patterns(
     text: str,
     language: str = "auto",

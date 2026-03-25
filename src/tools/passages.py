@@ -182,6 +182,49 @@ def delete_passage(document_id: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def batch_add_passages(items: list) -> dict:
+    """Add multiple writing passages in a single call. Never raises; collects per-item errors."""
+    results = []
+    succeeded = 0
+    failed = 0
+
+    for i, item in enumerate(items):
+        if not isinstance(item, dict) or not item.get("text"):
+            failed += 1
+            results.append({
+                "index": i,
+                "success": False,
+                "error": "item must be a dict with a non-empty 'text' field",
+            })
+            continue
+
+        result = add_passage(
+            text=item["text"],
+            doc_type=item.get("doc_type", "general"),
+            language=item.get("language", "en"),
+            domain=item.get("domain", "general"),
+            quality_notes=item.get("quality_notes", ""),
+            tags=item.get("tags"),
+            source=item.get("source", "manual"),
+            style=item.get("style"),
+        )
+        result["index"] = i
+        results.append(result)
+        if result.get("success"):
+            succeeded += 1
+        else:
+            failed += 1
+
+    total = len(items)
+    return {
+        "success": True,
+        "total": total,
+        "succeeded": succeeded,
+        "failed": failed,
+        "results": results,
+    }
+
+
 def update_passage(
     document_id: str,
     text: Optional[str] = None,

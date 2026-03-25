@@ -245,3 +245,74 @@ def test_update_passage_warns_on_unknown_style():
     assert result["success"] is True
     assert len(result["warnings"]) == 1
     assert "unknown-style" in result["warnings"][0]
+
+
+# --- batch_add_passages tests ---
+
+def test_batch_add_passages_all_succeed():
+    mock_point_ids = [str(uuid4())]
+    items = [
+        {"text": "First passage about governance."},
+        {"text": "Second passage about climate.", "domain": "climate", "language": "en"},
+    ]
+    with patch("src.tools.passages.index_document", return_value=mock_point_ids):
+        from src.tools.passages import batch_add_passages
+        result = batch_add_passages(items=items)
+    assert result["success"] is True
+    assert result["total"] == 2
+    assert result["succeeded"] == 2
+    assert result["failed"] == 0
+    assert len(result["results"]) == 2
+    assert all(r["success"] for r in result["results"])
+    assert result["results"][0]["index"] == 0
+    assert result["results"][1]["index"] == 1
+
+
+def test_batch_add_passages_partial_failure():
+    mock_point_ids = [str(uuid4())]
+    items = [
+        {"text": "Valid passage."},
+        {"doc_type": "report"},  # missing text — should fail
+        {"text": "Another valid passage."},
+    ]
+    with patch("src.tools.passages.index_document", return_value=mock_point_ids):
+        from src.tools.passages import batch_add_passages
+        result = batch_add_passages(items=items)
+    assert result["success"] is True
+    assert result["total"] == 3
+    assert result["succeeded"] == 2
+    assert result["failed"] == 1
+    failed = [r for r in result["results"] if not r["success"]]
+    assert len(failed) == 1
+    assert failed[0]["index"] == 1
+    assert "text" in failed[0]["error"]
+
+
+def test_batch_add_passages_empty_list():
+    from src.tools.passages import batch_add_passages
+    result = batch_add_passages(items=[])
+    assert result["success"] is True
+    assert result["total"] == 0
+    assert result["succeeded"] == 0
+    assert result["failed"] == 0
+    assert result["results"] == []
+
+
+def test_batch_add_passages_non_dict_item():
+    from src.tools.passages import batch_add_passages
+    result = batch_add_passages(items=["not a dict", None])
+    assert result["success"] is True
+    assert result["total"] == 2
+    assert result["failed"] == 2
+    for r in result["results"]:
+        assert r["success"] is False
+
+
+def test_batch_add_passages_per_item_validation_error_does_not_raise():
+    """An invalid doc_type inside an item should produce a per-item failure, not raise."""
+    items = [{"text": "Good text.", "doc_type": "invalid-type"}]
+    from src.tools.passages import batch_add_passages
+    result = batch_add_passages(items=items)
+    assert result["success"] is True
+    assert result["failed"] == 1
+    assert "doc_type" in result["results"][0]["error"].lower()

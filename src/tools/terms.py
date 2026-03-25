@@ -157,6 +157,48 @@ def delete_term(document_id: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
+def batch_add_terms(items: list) -> dict:
+    """Add multiple terminology entries in a single call. Never raises; collects per-item errors."""
+    results = []
+    succeeded = 0
+    failed = 0
+
+    for i, item in enumerate(items):
+        if not isinstance(item, dict) or not item.get("preferred"):
+            failed += 1
+            results.append({
+                "index": i,
+                "success": False,
+                "error": "item must be a dict with a non-empty 'preferred' field",
+            })
+            continue
+
+        result = add_term(
+            preferred=item["preferred"],
+            avoid=item.get("avoid", ""),
+            domain=item.get("domain", "general"),
+            language=item.get("language", "en"),
+            why=item.get("why", ""),
+            example_bad=item.get("example_bad", ""),
+            example_good=item.get("example_good", ""),
+        )
+        result["index"] = i
+        results.append(result)
+        if result.get("success"):
+            succeeded += 1
+        else:
+            failed += 1
+
+    total = len(items)
+    return {
+        "success": True,
+        "total": total,
+        "succeeded": succeeded,
+        "failed": failed,
+        "results": results,
+    }
+
+
 def update_term(
     document_id: str,
     preferred: Optional[str] = None,

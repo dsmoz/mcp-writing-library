@@ -147,3 +147,71 @@ def test_update_term_success():
     assert "why" in result["updated_fields"]
     assert "domain" in result["updated_fields"]
     assert result["chunks_created"] == 1
+
+
+# --- batch_add_terms tests ---
+
+def test_batch_add_terms_all_succeed():
+    mock_point_ids = [str(uuid4())]
+    items = [
+        {"preferred": "rights-holder", "avoid": "victim"},
+        {"preferred": "key populations", "domain": "srhr", "language": "en"},
+    ]
+    with patch("src.tools.terms.index_document", return_value=mock_point_ids):
+        from src.tools.terms import batch_add_terms
+        result = batch_add_terms(items=items)
+    assert result["success"] is True
+    assert result["total"] == 2
+    assert result["succeeded"] == 2
+    assert result["failed"] == 0
+    assert len(result["results"]) == 2
+    assert all(r["success"] for r in result["results"])
+    assert result["results"][0]["index"] == 0
+    assert result["results"][1]["index"] == 1
+
+
+def test_batch_add_terms_partial_failure():
+    mock_point_ids = [str(uuid4())]
+    items = [
+        {"preferred": "rights-holder"},
+        {"avoid": "victim"},  # missing preferred — should fail
+        {"preferred": "survivor", "avoid": "victim"},
+    ]
+    with patch("src.tools.terms.index_document", return_value=mock_point_ids):
+        from src.tools.terms import batch_add_terms
+        result = batch_add_terms(items=items)
+    assert result["success"] is True
+    assert result["total"] == 3
+    assert result["succeeded"] == 2
+    assert result["failed"] == 1
+    failed = [r for r in result["results"] if not r["success"]]
+    assert failed[0]["index"] == 1
+    assert "preferred" in failed[0]["error"]
+
+
+def test_batch_add_terms_empty_list():
+    from src.tools.terms import batch_add_terms
+    result = batch_add_terms(items=[])
+    assert result["success"] is True
+    assert result["total"] == 0
+    assert result["succeeded"] == 0
+    assert result["failed"] == 0
+    assert result["results"] == []
+
+
+def test_batch_add_terms_non_dict_item():
+    from src.tools.terms import batch_add_terms
+    result = batch_add_terms(items=["not a dict", 42])
+    assert result["success"] is True
+    assert result["total"] == 2
+    assert result["failed"] == 2
+
+
+def test_batch_add_terms_per_item_validation_does_not_raise():
+    """An invalid domain inside an item should produce a per-item failure, not raise."""
+    items = [{"preferred": "PLHIV", "domain": "invalid-domain"}]
+    from src.tools.terms import batch_add_terms
+    result = batch_add_terms(items=items)
+    assert result["success"] is True
+    assert result["failed"] == 1
+    assert "domain" in result["results"][0]["error"].lower()
