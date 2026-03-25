@@ -101,14 +101,14 @@ _DOMAIN_PATTERNS = {
         r'\b(indicator|target|baseline|milestone|output|outcome|result'
         r'|monitoring|evaluation|assessment|KPI|benchmark'
         r'|indicador|meta|linha de base|marco|produto|resultado'
-        r'|monitoramento|monitorização|avaliação|avaliação)\b',
+        r'|monitoramento|monitorização|avaliação|supervisão)\b',
         re.IGNORECASE,
     ),
     "org": re.compile(
         r'\b(staff turnover|employee satisfaction|organizational capacity'
-        r'|governance structure|board|management|HR|human resources'
-        r'|rotatividade|satisfação dos funcionários|capacidade organizacional'
-        r'|estrutura de governação|conselho|gestão|recursos humanos)\b',
+        r'|governance structure|human resources'
+        r'|rotatividade de pessoal|satisfação dos funcionários|capacidade organizacional'
+        r'|estrutura de governação|recursos humanos)\b',
         re.IGNORECASE,
     ),
     "health": re.compile(
@@ -123,7 +123,7 @@ _DOMAIN_PATTERNS = {
 }
 
 
-def _get_claim_patterns(domain: str) -> list:
+def _get_claim_patterns(domain: str) -> List[re.Pattern]:
     """Return the list of claim-detection patterns for the given domain.
 
     If domain is in _DOMAIN_PATTERNS, the domain-specific pattern is appended
@@ -140,7 +140,7 @@ def _split_sentences(text: str) -> List[str]:
     return [s.strip() for s in sentences if len(s.strip()) >= 20]
 
 
-def _is_claim_sentence(sentence: str, patterns: list = None) -> bool:
+def _is_claim_sentence(sentence: str, patterns: List[re.Pattern] = None) -> bool:
     """Return True if the sentence matches any claim-bearing pattern.
 
     Args:
@@ -324,7 +324,7 @@ def verify_claims(
     }
 
 
-def score_evidence_density(text: str) -> dict:
+def score_evidence_density(text: str, domain: str = "general") -> dict:
     """
     Analyse the ratio of evidenced sentences to total sentences without
     calling any external search APIs.
@@ -334,10 +334,13 @@ def score_evidence_density(text: str) -> dict:
 
     Args:
         text: The text to score.
+        domain: Thematic domain for domain-specific claim pattern augmentation.
+                Valid values: "general", "finance", "governance", "climate",
+                "m-and-e", "org", "health". Unknown values fall back to general patterns.
 
     Returns:
         dict with total_sentences, claim_sentences, cited_sentences,
-        evidence_density, verdict, and a recommendation string.
+        evidence_density, verdict, domain, and a recommendation string.
     """
     if not text or not text.strip():
         return {"success": False, "error": "text cannot be empty"}
@@ -348,7 +351,8 @@ def score_evidence_density(text: str) -> dict:
     if total == 0:
         return {"success": False, "error": "No valid sentences found in text"}
 
-    claim_count = sum(1 for s in sentences if _is_claim_sentence(s))
+    claim_patterns = _get_claim_patterns(domain)
+    claim_count = sum(1 for s in sentences if _is_claim_sentence(s, patterns=claim_patterns))
     cited_count = sum(1 for s in sentences if _has_citation(s))
 
     density = round(cited_count / claim_count, 4) if claim_count > 0 else 0.0
@@ -386,5 +390,6 @@ def score_evidence_density(text: str) -> dict:
         "cited_sentences": cited_count,
         "evidence_density": density,
         "verdict": verdict,
+        "domain": domain,
         "recommendation": recommendation,
     }

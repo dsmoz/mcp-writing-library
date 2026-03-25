@@ -632,7 +632,7 @@ def verify_claims(
 
 
 @mcp.tool()
-def score_evidence_density(text: str) -> dict:
+def score_evidence_density(text: str, domain: str = "general") -> dict:
     """
     Analyse the ratio of cited claim sentences to total claim sentences,
     without calling any external search APIs.
@@ -657,14 +657,17 @@ def score_evidence_density(text: str) -> dict:
 
     Args:
         text: The passage or document section to analyse
+        domain: Thematic domain for domain-specific claim pattern augmentation.
+                Valid values: "general", "finance", "governance", "climate",
+                "m-and-e", "org", "health". Unknown values fall back to general patterns.
 
     Returns:
         total_sentences, claim_sentences, cited_sentences, evidence_density (0–1),
-        verdict (well-evidenced|partially-evidenced|under-evidenced), and
+        verdict (well-evidenced|partially-evidenced|under-evidenced), domain, and
         a recommendation string with actionable guidance.
     """
     from src.tools.evidence import score_evidence_density as _score
-    return _score(text=text)
+    return _score(text=text, domain=domain)
 
 
 @mcp.tool()
