@@ -11,8 +11,12 @@ from src.tools.styles import VALID_STYLES
 logger = structlog.get_logger(__name__)
 
 VALID_DOC_TYPES = {
-    "executive-summary", "concept-note", "policy-brief",
-    "report", "email", "general"
+    # Proposal documents
+    "executive-summary", "concept-note", "policy-brief", "full-proposal", "eoi",
+    # Reports and assessments
+    "report", "annual-report", "monitoring-report", "financial-report", "assessment",
+    # Operational documents
+    "email", "tor", "general",
 }
 VALID_LANGUAGES = {"en", "pt"}
 VALID_DOMAINS = {"srhr", "governance", "climate", "general", "m-and-e"}

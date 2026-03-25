@@ -10,7 +10,14 @@ from src.tools.collections import get_collection_names
 logger = structlog.get_logger(__name__)
 
 VALID_DONORS = {"usaid", "undp", "global-fund", "eu", "general"}
-VALID_DOC_TYPES = {"concept-note", "full-proposal", "eoi", "annual-report", "general"}
+VALID_DOC_TYPES = {
+    # Proposal documents
+    "concept-note", "full-proposal", "eoi",
+    # Reports and assessments
+    "annual-report", "monitoring-report", "financial-report", "assessment",
+    # Operational documents
+    "tor", "governance-review", "general",
+}
 
 # Thresholds for embedding-based (cosine) scoring
 _EMBED_THRESHOLD_PRESENT = 0.55

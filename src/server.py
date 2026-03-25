@@ -46,7 +46,7 @@ def search_passages(
 
     Args:
         query: What you need (e.g. "executive summary opening about health equity")
-        doc_type: Filter by type: executive-summary|concept-note|policy-brief|report|email|general
+        doc_type: Filter by type: executive-summary|concept-note|policy-brief|report|annual-report|monitoring-report|financial-report|assessment|email|tor|general
         language: Filter by language: en|pt
         domain: Filter by domain: srhr|governance|climate|general|m-and-e
         style: Filter by style: narrative|data-driven|argumentative|minimalist|
@@ -78,11 +78,11 @@ def add_passage(
     Store an exemplary writing passage in the library.
 
     Use this when you produce a passage you are proud of, or to seed the library
-    with models from reference documents (UNDP HDR, Global Fund reports, etc.).
+    with models from reference documents (UNDP HDR, Global Fund reports, M&E assessments, TORs, etc.).
 
     Args:
         text: The passage (one or more paragraphs)
-        doc_type: Context: executive-summary|concept-note|policy-brief|report|email|general
+        doc_type: Context: executive-summary|concept-note|policy-brief|report|email|tor|general
         language: Language: en|pt
         domain: Thematic area: srhr|governance|climate|general|m-and-e
         quality_notes: What makes this passage good (helps future retrieval)
@@ -225,7 +225,7 @@ def update_passage(
     Args:
         document_id: UUID of the passage to update
         text: Replacement passage text (re-embeds the document)
-        doc_type: New document type: executive-summary|concept-note|policy-brief|report|email|general
+        doc_type: New document type: executive-summary|concept-note|policy-brief|report|annual-report|monitoring-report|financial-report|assessment|email|tor|general
         language: New language: en|pt
         domain: New domain: srhr|governance|climate|general|m-and-e
         quality_notes: Updated quality notes
@@ -674,14 +674,14 @@ def add_rubric_criterion(
     red_flags: Optional[List[str]] = None,
 ) -> dict:
     """
-    Store a donor evaluation criterion in the rubric library.
+    Store an evaluation criterion for a document in the rubric library.
 
     Use this to build up a library of evaluation criteria per donor so that
-    proposal text can later be scored against them with score_against_rubric().
+    documents can later be scored against them with score_against_rubric().
 
     Args:
         donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
-        section: Proposal section name (e.g. "technical-approach", "sustainability", "m-and-e")
+        section: Document section name (e.g. "technical-approach", "sustainability", "m-and-e")
         criterion: The criterion description (what evaluators look for)
         weight: Relative importance 0.1–2.0 (default 1.0). Higher = more important criterion.
         red_flags: Phrases or patterns that evaluators penalise (optional)
@@ -702,13 +702,13 @@ def score_against_rubric(
     top_k: int = 5,
 ) -> dict:
     """
-    Score a proposal text against stored evaluation criteria for a given donor.
+    Score a document section against stored evaluation criteria for a given donor or evaluator.
 
     Retrieves the most relevant criteria for the donor (and optionally section),
     computes a weighted semantic similarity score, and returns a verdict.
 
     Args:
-        text: Proposal text to score (a section or full document)
+        text: Document text to score (a section or full document)
         donor: Donor name to filter criteria — usaid|undp|global-fund|eu|general
         section: Optional section filter (e.g. "technical-approach"). If omitted, all sections are used.
         top_k: Number of criteria to match (default 5)
@@ -746,15 +746,15 @@ def add_template(
     sections: List[dict],
 ) -> dict:
     """
-    Store a proposal template (list of required sections) for a donor and document type.
+    Store a document template (list of required sections) for a donor and document type.
 
-    Use this to define the expected structure of a concept note, full proposal, or EOI
-    for a specific donor. Once stored, use check_structure() to verify a draft covers
-    all required sections.
+    Use this to define the expected structure of documents such as concept notes, proposals, EOIs,
+    monitoring reports, or assessments for a specific donor. Once stored, use check_structure()
+    to verify a draft covers all required sections.
 
     Args:
         donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
-        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, general
+        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, monitoring-report, financial-report, assessment, general
         sections: List of section dicts. Each must have:
                   - name (str): Section name (e.g. "Executive Summary")
                   - description (str): What this section should contain
@@ -784,7 +784,7 @@ def check_structure(
     Args:
         text: The document draft text to check
         donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
-        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, general
+        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, monitoring-report, financial-report, assessment, general
 
     Returns:
         {success, donor, doc_type, template_document_id, total_sections, required_sections,
@@ -799,7 +799,7 @@ def check_structure(
 @mcp.tool()
 def list_templates() -> dict:
     """
-    Return all stored proposal templates.
+    Return all stored document templates.
 
     Use this to see which donor+doc_type combinations have templates stored,
     before calling check_structure().
