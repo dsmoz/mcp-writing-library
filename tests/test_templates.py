@@ -253,7 +253,7 @@ def test_check_structure_incomplete_verdict():
 
 
 def test_check_structure_returns_section_detail():
-    """Result must include per-section coverage_score and status fields."""
+    """Result must include per-section coverage_score, status, and scoring_method fields."""
     sections = [
         {"name": "Technical Approach", "description": "methodology theory of change", "required": True, "order": 1},
     ]
@@ -274,6 +274,10 @@ def test_check_structure_returns_section_detail():
     assert "status" in sec
     assert "coverage_score" in sec
     assert isinstance(sec["coverage_score"], float)
+    assert "scoring_method" in sec
+    assert sec["scoring_method"] == "keyword"
+    # Top-level scoring_method should be present
+    assert result["scoring_method"] == "keyword"
 
 
 def test_check_structure_with_embedding_success():
@@ -296,6 +300,8 @@ def test_check_structure_with_embedding_success():
     assert result["success"] is True
     # With identical embeddings for all texts, cosine sim = 1.0 → "present"
     assert result["sections"][0]["status"] == "present"
+    assert result["sections"][0]["scoring_method"] == "embedding"
+    assert result["scoring_method"] == "embedding"
 
 
 def test_check_structure_kbase_unavailable():
@@ -304,6 +310,85 @@ def test_check_structure_kbase_unavailable():
         result = check_structure(text="Some text.", donor="undp", doc_type="concept-note")
     assert result["success"] is False
     assert "kbase" in result["error"].lower()
+
+
+def test_check_structure_empty_text():
+    """Empty or whitespace-only text should return early with an error."""
+    from src.tools.templates import check_structure
+    result = check_structure(text="", donor="undp", doc_type="concept-note")
+    assert result["success"] is False
+    assert "empty" in result["error"].lower()
+
+    result_ws = check_structure(text="   \n\n  ", donor="undp", doc_type="concept-note")
+    assert result_ws["success"] is False
+    assert "empty" in result_ws["error"].lower()
+
+
+def test_check_structure_per_section_embedding_fallback():
+    """
+    When embedding fails for one section but succeeds for another,
+    that section uses keyword scoring while the other uses embedding.
+    The top-level scoring_method should be 'mixed'.
+    """
+    sections = [
+        {"name": "Executive Summary", "description": "overview objectives budget", "required": True, "order": 1},
+        {"name": "Problem Statement", "description": "development problem populations", "required": True, "order": 2},
+    ]
+    template_result = _make_template_search_result("undp", "concept-note", sections)
+    draft = (
+        "Executive Summary\n\nThis project addresses a critical need.\n\n"
+        "Problem Statement\n\nThe development problem affects many populations."
+    )
+
+    fake_embedding = [1.0] + [0.0] * 767
+
+    def embedding_side_effect(text):
+        # Fail specifically when generating the embedding for the second section query
+        if "Problem Statement" in text and "development problem populations" in text:
+            raise RuntimeError("simulated embedding failure")
+        return fake_embedding
+
+    with patch("src.tools.templates.semantic_search", return_value=[template_result]):
+        with patch("src.tools.templates._embedding_available", True):
+            with patch("src.tools.templates._generate_embedding", side_effect=embedding_side_effect):
+                from src.tools.templates import check_structure
+                result = check_structure(text=draft, donor="undp", doc_type="concept-note")
+
+    assert result["success"] is True
+    # Top-level scoring_method must be 'mixed' (one embedding, one keyword)
+    assert result["scoring_method"] == "mixed"
+    methods = {s["name"]: s["scoring_method"] for s in result["sections"]}
+    assert methods["Executive Summary"] == "embedding"
+    assert methods["Problem Statement"] == "keyword"
+
+
+def test_check_structure_keyword_thresholds():
+    """
+    Keyword scoring should use lower thresholds so matching text is not classified as missing.
+    """
+    sections = [
+        {
+            "name": "Budget Overview",
+            "description": "budget financial cost categories",
+            "required": True,
+            "order": 1,
+        },
+    ]
+    template_result = _make_template_search_result("eu", "eoi", sections)
+    # Text has a few matching words — should score above KW_THRESHOLD_PRESENT (0.15)
+    draft = "Budget Overview\n\nThe budget includes financial cost categories for all activities."
+
+    with patch("src.tools.templates.semantic_search", return_value=[template_result]):
+        with patch("src.tools.templates._embedding_available", False):
+            with patch("src.tools.templates._generate_embedding", None):
+                from src.tools.templates import check_structure
+                result = check_structure(text=draft, donor="eu", doc_type="eoi")
+
+    assert result["success"] is True
+    sec = result["sections"][0]
+    assert sec["scoring_method"] == "keyword"
+    # With several matching words (budget, financial, cost, categories), should NOT be missing
+    assert sec["status"] in ("present", "partial")
 
 
 # ---------------------------------------------------------------------------

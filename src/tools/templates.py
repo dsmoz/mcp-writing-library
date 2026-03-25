@@ -12,6 +12,14 @@ logger = structlog.get_logger(__name__)
 VALID_DONORS = {"usaid", "undp", "global-fund", "eu", "general"}
 VALID_DOC_TYPES = {"concept-note", "full-proposal", "eoi", "annual-report", "general"}
 
+# Thresholds for embedding-based (cosine) scoring
+_EMBED_THRESHOLD_PRESENT = 0.55
+_EMBED_THRESHOLD_PARTIAL = 0.35
+
+# Thresholds for keyword-based scoring (lower range ~[0, 0.2])
+_KW_THRESHOLD_PRESENT = 0.15
+_KW_THRESHOLD_PARTIAL = 0.05
+
 try:
     from kbase.vector.sync_indexing import index_document
     from kbase.vector.sync_search import semantic_search
@@ -162,6 +170,9 @@ def check_structure(text: str, donor: str, doc_type: str) -> dict:
          present_count, partial_count, missing_count, verdict, sections, missing_required}
         verdict is "complete" (0 missing required) or "incomplete" (>0 missing required)
     """
+    if not text or not text.strip():
+        return {"success": False, "error": "text cannot be empty"}
+
     donor = donor.lower()
     doc_type = doc_type.lower()
 
@@ -210,14 +221,16 @@ def check_structure(text: str, donor: str, doc_type: str) -> dict:
     if not paragraphs:
         paragraphs = [text]
 
-    # Determine if embedding is available and working
-    use_embeddings = _embedding_available and _generate_embedding is not None
+    # Whether embeddings are globally available (per-section fallback is still possible)
+    embeddings_globally_available = _embedding_available and _generate_embedding is not None
 
     section_results = []
     missing_required: List[str] = []
     present_count = 0
     partial_count = 0
     missing_required_count = 0
+    sections_used_embedding = 0
+    sections_used_keyword = 0
 
     for sec in sections:
         sec_name = sec.get("name", "")
@@ -225,10 +238,11 @@ def check_structure(text: str, donor: str, doc_type: str) -> dict:
         sec_required = sec.get("required", True)
         query_text = f"{sec_name}: {sec_desc}"
 
-        # Compute coverage score across paragraphs
+        # Compute coverage score across paragraphs — try embedding first, fall back per section
         coverage_score = 0.0
+        section_scoring_method = "keyword"
 
-        if use_embeddings:
+        if embeddings_globally_available:
             try:
                 sec_embedding = _generate_embedding(query_text)
                 para_scores = []
@@ -242,23 +256,45 @@ def check_structure(text: str, donor: str, doc_type: str) -> dict:
                         pass
                 if para_scores:
                     coverage_score = max(para_scores)
+                    section_scoring_method = "embedding"
                 else:
-                    # All paragraph embeddings failed — fall back to keyword
-                    use_embeddings = False
-            except Exception:
-                # Section embedding failed — fall back to keyword
-                use_embeddings = False
+                    # All paragraph embeddings failed — fall back to keyword for this section
+                    logger.warning(
+                        "Embedding failed for section, using keyword fallback",
+                        section=sec_name,
+                        error="all paragraph embeddings failed",
+                    )
+            except Exception as e:
+                # Section embedding failed — fall back to keyword for this section
+                logger.warning(
+                    "Embedding failed for section, using keyword fallback",
+                    section=sec_name,
+                    error=str(e),
+                )
 
-        if not use_embeddings:
+        if section_scoring_method == "keyword":
             # Keyword fallback: max keyword coverage across paragraphs
             para_scores = [_keyword_coverage(sec_name, sec_desc, para) for para in paragraphs]
             coverage_score = max(para_scores) if para_scores else 0.0
 
-        # Classify status
-        if coverage_score >= 0.55:
+        # Tally scoring method usage
+        if section_scoring_method == "embedding":
+            sections_used_embedding += 1
+        else:
+            sections_used_keyword += 1
+
+        # Classify status using appropriate thresholds
+        if section_scoring_method == "embedding":
+            threshold_present = _EMBED_THRESHOLD_PRESENT
+            threshold_partial = _EMBED_THRESHOLD_PARTIAL
+        else:
+            threshold_present = _KW_THRESHOLD_PRESENT
+            threshold_partial = _KW_THRESHOLD_PARTIAL
+
+        if coverage_score >= threshold_present:
             status = "present"
             present_count += 1
-        elif coverage_score >= 0.35:
+        elif coverage_score >= threshold_partial:
             status = "partial"
             partial_count += 1
         else:
@@ -272,10 +308,19 @@ def check_structure(text: str, donor: str, doc_type: str) -> dict:
             "required": sec_required,
             "status": status,
             "coverage_score": round(coverage_score, 4),
+            "scoring_method": section_scoring_method,
         })
 
     required_sections = sum(1 for s in sections if s.get("required", True))
     verdict = "complete" if missing_required_count == 0 else "incomplete"
+
+    # Determine top-level scoring_method
+    if sections_used_embedding > 0 and sections_used_keyword == 0:
+        top_scoring_method = "embedding"
+    elif sections_used_keyword > 0 and sections_used_embedding == 0:
+        top_scoring_method = "keyword"
+    else:
+        top_scoring_method = "mixed"
 
     return {
         "success": True,
@@ -288,6 +333,7 @@ def check_structure(text: str, donor: str, doc_type: str) -> dict:
         "partial_count": partial_count,
         "missing_count": missing_required_count,
         "verdict": verdict,
+        "scoring_method": top_scoring_method,
         "sections": section_results,
         "missing_required": missing_required,
     }
