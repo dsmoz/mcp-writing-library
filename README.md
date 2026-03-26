@@ -67,7 +67,7 @@ flowchart TD
 
 | Tool | Function | Description |
 |------|----------|-------------|
-| `verify_claims` | `verify_claims(text, domain, top_k_per_claim)` | Hallucination detection via Zotero + Cerebellum |
+| `verify_claims` | `verify_claims(text, domain, top_k_per_claim, research_paths)` | Hallucination detection; local files searched first, then Zotero + Cerebellum |
 | `score_evidence_density` | `score_evidence_density(text, domain)` | Offline ratio of evidenced vs. bare assertions |
 
 ### Donor Rubrics
@@ -141,6 +141,7 @@ uv run python main.py
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.2.1 | 2026-03-26 | `research_paths` on `verify_claims` — local file evidence tier before Zotero/Cerebellum |
 | 1.2.0 | 2026-03-26 | 18 new tools: evidence, rubrics, templates, consistency, style profiles, CRUD, batch, export |
 | 1.1.0 | 2026-03-17 | Styles system, plagiarism/similarity checks, 4 new tools |
 | 1.0.0 | 2026-03-15 | Initial release: 6 tools, passages + terms modules, cloud Qdrant |

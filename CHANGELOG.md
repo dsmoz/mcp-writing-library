@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
+## [1.2.1] - 2026-03-26
+
+### Added
+
+- `research_paths` parameter on `verify_claims`: accept a list of local file/directory paths (.md, .txt, .pdf); files are read at call time (never indexed) and searched first before Zotero/Cerebellum; a strong local match short-circuits remote searches for that claim
+- `_read_research_files` — reads and chunks local research documents from paths/directories into 300-word chunks
+- `_search_local_files` — keyword-overlap scoring of local chunks against a claim sentence (offline, no embedding required)
+
 ## [1.2.0] - 2026-03-26
 
 ### Added

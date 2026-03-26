@@ -105,9 +105,12 @@ result = verify_claims(
     text="...",
     domain="health",  # general|health|finance|governance|climate|m-and-e|org
     top_k_per_claim=3,
+    # Optional: pass local research files to search first (no indexing)
+    research_paths=["/path/to/project/research/", "/path/to/specific-report.md"],
 )
 # Returns: overall_evidence_score, verdict, per-claim verdicts, ghost_stat flags
 # ghost_stat: True = number with no source trail (always a blocker)
+# Search order: local files → Zotero → Cerebellum (local match short-circuits remote)
 ```
 
 ## Pattern 7 — Rubric Alignment
