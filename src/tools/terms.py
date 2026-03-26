@@ -6,11 +6,9 @@ from uuid import uuid4
 import structlog
 
 from src.tools.collections import get_collection_names
+from src.tools.registry import VALID_DOMAINS, VALID_LANGUAGES_TERMS as VALID_LANGUAGES
 
 logger = structlog.get_logger(__name__)
-
-VALID_DOMAINS = {"srhr", "governance", "climate", "general", "m-and-e"}
-VALID_LANGUAGES = {"en", "pt", "both"}
 
 # Module-level imports so tests can patch src.tools.terms.*
 try:

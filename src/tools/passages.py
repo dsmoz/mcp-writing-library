@@ -6,20 +6,10 @@ from uuid import uuid4
 import structlog
 
 from src.tools.collections import get_collection_names
+from src.tools.registry import VALID_DOC_TYPES, VALID_DOMAINS, VALID_LANGUAGES
 from src.tools.styles import VALID_STYLES
 
 logger = structlog.get_logger(__name__)
-
-VALID_DOC_TYPES = {
-    # Proposal documents
-    "executive-summary", "concept-note", "policy-brief", "full-proposal", "eoi",
-    # Reports and assessments
-    "report", "annual-report", "monitoring-report", "financial-report", "assessment",
-    # Operational documents
-    "email", "tor", "general",
-}
-VALID_LANGUAGES = {"en", "pt"}
-VALID_DOMAINS = {"srhr", "governance", "climate", "general", "m-and-e"}
 
 # Imported here so tests can patch src.tools.passages.*
 try:
