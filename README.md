@@ -141,6 +141,7 @@ uv run python main.py
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.2.2 | 2026-03-26 | Social media doc_types: `facebook-post`, `linkedin-post`, `instagram-caption` |
 | 1.2.1 | 2026-03-26 | `research_paths` on `verify_claims` — local file evidence tier before Zotero/Cerebellum |
 | 1.2.0 | 2026-03-26 | 18 new tools: evidence, rubrics, templates, consistency, style profiles, CRUD, batch, export |
 | 1.1.0 | 2026-03-17 | Styles system, plagiarism/similarity checks, 4 new tools |

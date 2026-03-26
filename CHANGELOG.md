@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
+## [1.2.2] - 2026-03-26
+
+### Added
+
+- Social media `doc_type` support: `facebook-post`, `linkedin-post`, `instagram-caption` added to `VALID_DOC_TYPES` in `registry.py`
+- `score_ai_patterns` calibrated for social doc_types: paragraph limits (facebook: 2, linkedin: 3, instagram: 1) and discursive targets (all social: 0.0 or 0.5)
+- `discursive_deficit` check skipped for social doc_types — short-form posts legitimately omit discursive connectors
+
 ## [1.2.1] - 2026-03-26
 
 ### Added
