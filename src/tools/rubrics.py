@@ -9,7 +9,8 @@ from src.tools.collections import get_collection_names
 
 logger = structlog.get_logger(__name__)
 
-VALID_DONORS = {"usaid", "undp", "global-fund", "eu", "general"}
+# Donor is a free-form label — no closed enum. Use lowercase slugs (e.g. "lambda",
+# "usaid", "undp", "oca-2025"). list_rubric_donors() discovers all stored values.
 
 try:
     from kbase.vector.sync_indexing import index_document
@@ -41,12 +42,9 @@ def add_rubric_criterion(
     Returns:
         {success, document_id, chunks_created, collection} on success
     """
-    donor = donor.lower()
-    if donor not in VALID_DONORS:
-        return {
-            "success": False,
-            "error": f"Invalid donor '{donor}'. Must be one of: {sorted(VALID_DONORS)}",
-        }
+    donor = donor.lower().strip()
+    if not donor:
+        return {"success": False, "error": "donor cannot be empty"}
 
     if not criterion or not criterion.strip():
         return {"success": False, "error": "criterion cannot be empty"}
@@ -115,12 +113,9 @@ def score_against_rubric(
     """
     if doc_context:
         logger.debug("score_against_rubric context", doc_context=doc_context)
-    donor = donor.lower()
-    if donor not in VALID_DONORS:
-        return {
-            "success": False,
-            "error": f"Invalid donor '{donor}'. Must be one of: {sorted(VALID_DONORS)}",
-        }
+    donor = donor.lower().strip()
+    if not donor:
+        return {"success": False, "error": "donor cannot be empty"}
 
     if semantic_search is None:
         return {"success": False, "error": "kbase library is not available"}
