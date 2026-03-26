@@ -158,6 +158,10 @@ _PARA_LIMITS = {
     "assessment": 7,
     "tor": 6,
     "governance-review": 6,
+    # Social media — short-form, single visual blocks
+    "facebook-post": 2,
+    "linkedin-post": 3,
+    "instagram-caption": 1,
 }
 
 # Required discursive expressions per 300-word page, keyed by doc_type
@@ -173,7 +177,14 @@ _DISCURSIVE_TARGETS = {
     "assessment": 1.0,
     "tor": 0.5,
     "governance-review": 1.0,
+    # Social media — discursive connectors are not expected in short-form posts
+    "facebook-post": 0.0,
+    "linkedin-post": 0.5,
+    "instagram-caption": 0.0,
 }
+
+# Social doc_types where discursive_deficit is structurally inapplicable
+_SOCIAL_DOC_TYPES = frozenset({"facebook-post", "linkedin-post", "instagram-caption"})
 
 
 # ---------------------------------------------------------------------------
@@ -467,7 +478,8 @@ def score_ai_patterns(
         doc_type: Document type for threshold calibration. One of: concept-note,
                   full-proposal, eoi, executive-summary, general, annual-report,
                   monitoring-report, financial-report, assessment, tor,
-                  governance-review. Default: "general".
+                  governance-review, facebook-post, linkedin-post,
+                  instagram-caption. Default: "general".
 
     Returns:
         dict with overall_score, verdict, per-category scores and findings,
@@ -501,7 +513,10 @@ def score_ai_patterns(
         monotony_score, monotony_findings = _detect_sentence_monotony(text)
         passive_score, passive_findings = _detect_passive_voice(text)
         para_len_score, para_len_findings = _detect_paragraph_length(text, max_sentences=para_limit)
-        discursive_score, discursive_findings = _detect_discursive_deficit(text, target=discursive_target)
+        if doc_type in _SOCIAL_DOC_TYPES:
+            discursive_score, discursive_findings = 0.0, []
+        else:
+            discursive_score, discursive_findings = _detect_discursive_deficit(text, target=discursive_target)
         listing_score, listing_findings = _detect_mechanical_listing(text)
         closing_score, closing_findings = _detect_generic_closings(text)
 

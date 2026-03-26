@@ -23,6 +23,10 @@ VALID_DOC_TYPES = {
     "email",
     "tor",
     "general",
+    # Social media
+    "facebook-post",
+    "linkedin-post",
+    "instagram-caption",
 }
 
 VALID_DOMAINS = {

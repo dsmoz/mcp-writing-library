@@ -345,6 +345,45 @@ def test_invalid_doc_type_returns_error():
     assert "doc_type" in result["error"].lower() or "brochure" in result["error"]
 
 
+def test_linkedin_post_no_discursive_deficit_penalty():
+    # Plain factual post with no discursive expressions — linkedin-post should not penalise
+    text = (
+        "We reached 1,200 young people with HIV testing in 2024. "
+        "Community workers led the effort in Maputo and Gaza. "
+        "Thank you to our partners for making this possible."
+    )
+    result = score_ai_patterns(text, doc_type="linkedin-post")
+    assert result["success"] is True
+    assert result["doc_type"] == "linkedin-post"
+    cat = result["categories"]["discursive_deficit"]
+    assert cat["score"] == 0.0
+    assert cat["findings"] == []
+
+
+def test_facebook_post_no_discursive_deficit_penalty():
+    text = "Em 2024, chegámos a 1.200 jovens com testagem ao VIH. Obrigado aos nossos parceiros."
+    result = score_ai_patterns(text, doc_type="facebook-post")
+    assert result["success"] is True
+    cat = result["categories"]["discursive_deficit"]
+    assert cat["score"] == 0.0
+
+
+def test_instagram_caption_single_paragraph_limit():
+    # Two-sentence caption should not exceed instagram-caption limit (1)
+    # but a block with two clearly separated paragraph-like elements would
+    text = "Juntos chegamos mais longe. VIH testagem em Moçambique."
+    result = score_ai_patterns(text, doc_type="instagram-caption")
+    assert result["success"] is True
+    assert result["doc_type"] == "instagram-caption"
+
+
+def test_social_doc_types_are_valid():
+    # All three social types should be accepted without error
+    for dt in ("facebook-post", "linkedin-post", "instagram-caption"):
+        result = score_ai_patterns("Short post text here.", doc_type=dt)
+        assert result["success"] is True, f"Failed for doc_type={dt}"
+
+
 # ---------------------------------------------------------------------------
 # score_semantic_ai_likelihood tests
 # ---------------------------------------------------------------------------
