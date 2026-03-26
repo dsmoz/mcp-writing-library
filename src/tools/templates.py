@@ -1,5 +1,5 @@
 """
-Proposal structure enforcement: store and check donor proposal templates.
+Document structure enforcement: store and check templates for any framework or client.
 """
 from typing import List
 from uuid import uuid4
@@ -10,7 +10,8 @@ from src.tools.registry import VALID_DOC_TYPES
 
 logger = structlog.get_logger(__name__)
 
-VALID_DONORS = {"usaid", "undp", "global-fund", "eu", "general"}
+# framework is a free-form label — no closed enum. Use lowercase slugs
+# (e.g. "undp", "usaid", "lambda", "ds-moz"). list_templates() discovers all stored values.
 
 # Thresholds for embedding-based (cosine) scoring
 _EMBED_THRESHOLD_PRESENT = 0.55
@@ -64,13 +65,13 @@ def _keyword_coverage(section_name: str, section_description: str, paragraph: st
     return matches / len(words)
 
 
-def add_template(donor: str, doc_type: str, sections: list) -> dict:
+def add_template(framework: str, doc_type: str, sections: list) -> dict:
     """
-    Store a proposal template (list of required sections) for a donor+doc_type combination.
+    Store a proposal template (list of required sections) for a framework+doc_type combination.
 
     Args:
-        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
-        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, general
+        framework: Evaluation framework slug — any lowercase slug (e.g. "undp", "lambda", "ds-moz")
+        doc_type: Document type — must be one of the valid doc_types (see registry)
         sections: List of section dicts. Each must have:
                   - name (str): Section name
                   - description (str): What this section should contain
@@ -78,17 +79,14 @@ def add_template(donor: str, doc_type: str, sections: list) -> dict:
                   - order (int, optional): Expected position 1-based (default = list index + 1)
 
     Returns:
-        {success, document_id, chunks_created, donor, doc_type, section_count} on success,
+        {success, document_id, chunks_created, framework, doc_type, section_count} on success,
         or {success: False, error} on invalid input
     """
-    donor = donor.lower()
+    framework = framework.lower().strip()
     doc_type = doc_type.lower()
 
-    if donor not in VALID_DONORS:
-        return {
-            "success": False,
-            "error": f"Invalid donor '{donor}'. Must be one of: {sorted(VALID_DONORS)}",
-        }
+    if not framework:
+        return {"success": False, "error": "framework cannot be empty"}
 
     if doc_type not in VALID_DOC_TYPES:
         return {
@@ -118,7 +116,7 @@ def add_template(donor: str, doc_type: str, sections: list) -> dict:
 
     document_id = str(uuid4())
     collection = get_collection_names()["templates"]
-    title = f"[{donor.upper()} | {doc_type}] Template"
+    title = f"[{framework.upper()} | {doc_type}] Template"
 
     # Concatenate section names + descriptions for embedding
     content_parts = []
@@ -127,7 +125,7 @@ def add_template(donor: str, doc_type: str, sections: list) -> dict:
     content = "\n".join(content_parts)
 
     metadata = {
-        "donor": donor,
+        "framework": framework,
         "doc_type": doc_type,
         "sections": normalised,
         "section_count": len(normalised),
@@ -147,7 +145,7 @@ def add_template(donor: str, doc_type: str, sections: list) -> dict:
             "success": True,
             "document_id": document_id,
             "chunks_created": len(point_ids),
-            "donor": donor,
+            "framework": framework,
             "doc_type": doc_type,
             "section_count": len(normalised),
         }
@@ -156,31 +154,28 @@ def add_template(donor: str, doc_type: str, sections: list) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def check_structure(text: str, donor: str, doc_type: str) -> dict:
+def check_structure(text: str, framework: str, doc_type: str) -> dict:
     """
     Check whether a document draft covers all required sections from the stored template.
 
     Args:
         text: The document draft text to check
-        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
-        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, general
+        framework: Evaluation framework slug — any lowercase slug (e.g. "undp", "lambda", "ds-moz")
+        doc_type: Document type — must be one of the valid doc_types (see registry)
 
     Returns:
-        {success, donor, doc_type, template_document_id, total_sections, required_sections,
+        {success, framework, doc_type, template_document_id, total_sections, required_sections,
          present_count, partial_count, missing_count, verdict, sections, missing_required}
         verdict is "complete" (0 missing required) or "incomplete" (>0 missing required)
     """
     if not text or not text.strip():
         return {"success": False, "error": "text cannot be empty"}
 
-    donor = donor.lower()
+    framework = framework.lower().strip()
     doc_type = doc_type.lower()
 
-    if donor not in VALID_DONORS:
-        return {
-            "success": False,
-            "error": f"Invalid donor '{donor}'. Must be one of: {sorted(VALID_DONORS)}",
-        }
+    if not framework:
+        return {"success": False, "error": "framework cannot be empty"}
 
     if doc_type not in VALID_DOC_TYPES:
         return {
@@ -197,9 +192,9 @@ def check_structure(text: str, donor: str, doc_type: str) -> dict:
     try:
         raw_results = semantic_search(
             collection_name=collection,
-            query=f"{donor} {doc_type} template",
+            query=f"{framework} {doc_type} template",
             limit=1,
-            filter_conditions={"donor": donor, "doc_type": doc_type},
+            filter_conditions={"framework": framework, "doc_type": doc_type},
         )
     except Exception as e:
         logger.error("check_structure search failed", error=str(e))
@@ -208,7 +203,7 @@ def check_structure(text: str, donor: str, doc_type: str) -> dict:
     if not raw_results:
         return {
             "success": False,
-            "error": f"No template found for donor '{donor}' doc_type '{doc_type}'",
+            "error": f"No template found for framework '{framework}' doc_type '{doc_type}'",
         }
 
     template_result = raw_results[0]
@@ -324,7 +319,7 @@ def check_structure(text: str, donor: str, doc_type: str) -> dict:
 
     return {
         "success": True,
-        "donor": donor,
+        "framework": framework,
         "doc_type": doc_type,
         "template_document_id": template_doc_id,
         "total_sections": len(sections),
@@ -344,8 +339,8 @@ def list_templates() -> dict:
     Return all stored templates.
 
     Returns:
-        {success, templates: [{donor, doc_type, section_count, document_id}], total}
-        Sorted by donor then doc_type.
+        {success, templates: [{framework, doc_type, section_count, document_id}], total}
+        Sorted by framework then doc_type.
     """
     if get_qdrant_client is None:
         return {"success": False, "error": "kbase library is not available"}
@@ -369,7 +364,7 @@ def list_templates() -> dict:
                 payload = point.payload or {}
                 if payload.get("entry_type") == "template":
                     templates.append({
-                        "donor": payload.get("donor", ""),
+                        "framework": payload.get("framework", ""),
                         "doc_type": payload.get("doc_type", ""),
                         "section_count": payload.get("section_count", 0),
                         "document_id": payload.get("document_id", str(point.id)),
@@ -379,7 +374,7 @@ def list_templates() -> dict:
                 break
             offset = next_offset
 
-        templates.sort(key=lambda x: (x["donor"], x["doc_type"]))
+        templates.sort(key=lambda x: (x["framework"], x["doc_type"]))
 
         return {
             "success": True,

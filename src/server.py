@@ -17,9 +17,9 @@ Tools:
     check_external_similarity — detect similarity against web content (Tavily)
     score_external_similarity — score pre-fetched search results for similarity
     score_ai_patterns        — score text against known AI writing patterns
-    add_rubric_criterion     — store a donor evaluation criterion
-    score_against_rubric     — score proposal text against stored criteria
-    list_rubric_donors       — list donors with stored rubric criteria
+    add_rubric_criterion     — store an evaluation criterion for any framework
+    score_against_rubric     — score text against stored criteria for a framework
+    list_rubric_frameworks   — list frameworks with stored rubric criteria
     score_voice_consistency  — measure consistency of voice across sections
     detect_authorship_shift  — flag segments deviating stylistically from the majority
 """
@@ -55,7 +55,7 @@ def search_passages(
                undp|global-fund|danilo-voice|
                ai-sounding|bureaucratic|jargon-heavy
                Call list_styles() to see descriptions.
-        rubric_section: Filter by donor rubric section (e.g. "results-framework",
+        rubric_section: Filter by rubric section (e.g. "results-framework",
                         "technical-approach", "sustainability", "community-led").
                         Retrieves model passages for the specific section you are trying to strengthen.
         top_k: Number of results (default 5, max 20)
@@ -100,7 +100,7 @@ def add_passage(
         style: Style labels e.g. ["narrative", "donor-facing"].
                Call list_styles() to see all valid values.
                Unknown values are warned but do not block the save.
-        rubric_section: Optional donor rubric section this passage models
+        rubric_section: Optional rubric section this passage models
                         (e.g. "results-framework", "technical-approach", "sustainability").
                         Enables retrieval via search_passages(rubric_section=...) to find
                         model passages for a specific section you are trying to strengthen.
@@ -830,20 +830,21 @@ def score_evidence_density(text: str, domain: str = "general") -> dict:
 
 @mcp.tool()
 def add_rubric_criterion(
-    donor: str,
+    framework: str,
     section: str,
     criterion: str,
     weight: float = 1.0,
     red_flags: Optional[List[str]] = None,
 ) -> dict:
     """
-    Store an evaluation criterion for a document in the rubric library.
+    Store an evaluation criterion in the rubric library.
 
-    Use this to build up a library of evaluation criteria per donor so that
-    documents can later be scored against them with score_against_rubric().
+    Use this to build up evaluation criteria for any framework — donor proposals
+    (usaid, undp, global-fund), client deliverables (lambda, oca-2025), or
+    internal standards (ds-moz-editorial). Score later with score_against_rubric().
 
     Args:
-        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
+        framework: Evaluation framework slug — any lowercase slug (e.g. "usaid", "undp", "lambda", "oca-2025")
         section: Document section name (e.g. "technical-approach", "sustainability", "m-and-e")
         criterion: The criterion description (what evaluators look for)
         weight: Relative importance 0.1–2.0 (default 1.0). Higher = more important criterion.
@@ -851,75 +852,75 @@ def add_rubric_criterion(
 
     Returns:
         {success, document_id, chunks_created, collection} on success,
-        or {success: False, error} on invalid donor or empty criterion
+        or {success: False, error} on empty framework or empty criterion
     """
     from src.tools.rubrics import add_rubric_criterion as _add
-    return _add(donor=donor, section=section, criterion=criterion, weight=weight, red_flags=red_flags)
+    return _add(framework=framework, section=section, criterion=criterion, weight=weight, red_flags=red_flags)
 
 
 @mcp.tool()
 def score_against_rubric(
     text: str,
-    donor: str,
+    framework: str,
     section: Optional[str] = None,
     top_k: int = 5,
     doc_context: Optional[str] = None,
 ) -> dict:
     """
-    Score a document section against stored evaluation criteria for a given donor or evaluator.
+    Score a document section against stored evaluation criteria for a given framework.
 
-    Retrieves the most relevant criteria for the donor (and optionally section),
+    Retrieves the most relevant criteria for the framework (and optionally section),
     computes a weighted semantic similarity score, and returns a verdict.
 
     Args:
         text: Document section to score
-        donor: Donor name to filter criteria — usaid|undp|global-fund|eu|general
+        framework: Evaluation framework slug to filter criteria (e.g. "usaid", "lambda", "oca-2025")
         section: Optional section filter (e.g. "technical-approach"). If omitted, all sections are used.
         top_k: Number of criteria to match (default 5)
-        doc_context: Optional free-text context about the document type (e.g. "annual report", "financial audit"). Not stored — informational only.
+        doc_context: Optional free-text context about the document type (e.g. "annual report"). Not stored — informational only.
 
     Returns:
-        {success, donor, section, text_length, criteria_matched, overall_score,
+        {success, framework, section, text_length, criteria_matched, overall_score,
          verdict (strong|adequate|weak), criteria: [...], doc_context}
         Verdict: strong ≥0.7 | adequate 0.5–0.7 | weak <0.5
-        Returns {success: False, error} if donor invalid or no criteria found.
+        Returns {success: False, error} if framework is empty or no criteria found.
     """
     from src.tools.rubrics import score_against_rubric as _score
-    return _score(text=text, donor=donor, section=section, top_k=top_k, doc_context=doc_context)
+    return _score(text=text, framework=framework, section=section, top_k=top_k, doc_context=doc_context)
 
 
 @mcp.tool()
-def list_rubric_donors() -> dict:
+def list_rubric_frameworks() -> dict:
     """
-    Return all donors that have at least one criterion stored in the rubric library.
+    Return all frameworks that have at least one criterion stored in the rubric library.
 
-    Use this to see which donors are ready for rubric scoring before calling
+    Use this to see which frameworks are ready for rubric scoring before calling
     score_against_rubric().
 
     Returns:
-        {success, donors: [{donor, criterion_count}], total_donors, total_criteria}
-        Donors are sorted alphabetically.
+        {success, frameworks: [{framework, criterion_count}], total_frameworks, total_criteria}
+        Frameworks are sorted alphabetically.
     """
-    from src.tools.rubrics import list_rubric_donors as _list
+    from src.tools.rubrics import list_rubric_frameworks as _list
     return _list()
 
 
 @mcp.tool()
 def add_template(
-    donor: str,
+    framework: str,
     doc_type: str,
     sections: List[dict],
 ) -> dict:
     """
-    Store a document template (list of required sections) for a donor and document type.
+    Store a document template (list of required sections) for a framework and document type.
 
-    Use this to define the expected structure of documents such as concept notes, proposals, EOIs,
-    monitoring reports, or assessments for a specific donor. Once stored, use check_structure()
-    to verify a draft covers all required sections.
+    Use this to define the expected structure of documents for any framework — donor proposals
+    (usaid, undp), client deliverables (lambda, oca-2025), or internal standards. Once stored,
+    use check_structure() to verify a draft covers all required sections.
 
     Args:
-        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
-        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, monitoring-report, financial-report, assessment, general
+        framework: Evaluation framework slug — any lowercase slug (e.g. "undp", "lambda", "ds-moz")
+        doc_type: Document type — must be one of the valid doc_types (see registry)
         sections: List of section dicts. Each must have:
                   - name (str): Section name (e.g. "Executive Summary")
                   - description (str): What this section should contain
@@ -927,38 +928,38 @@ def add_template(
                   - order (int, optional): Expected position 1-based (default = list index + 1)
 
     Returns:
-        {success, document_id, chunks_created, donor, doc_type, section_count} on success,
+        {success, document_id, chunks_created, framework, doc_type, section_count} on success,
         or {success: False, error} on invalid input
     """
     from src.tools.templates import add_template as _add
-    return _add(donor=donor, doc_type=doc_type, sections=sections)
+    return _add(framework=framework, doc_type=doc_type, sections=sections)
 
 
 @mcp.tool()
 def check_structure(
     text: str,
-    donor: str,
+    framework: str,
     doc_type: str,
 ) -> dict:
     """
     Check whether a document draft covers all required sections from the stored template.
 
-    Retrieves the stored template for the donor+doc_type pair and evaluates each section's
+    Retrieves the stored template for the framework+doc_type pair and evaluates each section's
     presence in the draft using semantic similarity (with keyword fallback).
 
     Args:
         text: The document draft text to check
-        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
-        doc_type: Document type — must be one of: concept-note, full-proposal, eoi, annual-report, monitoring-report, financial-report, assessment, general
+        framework: Evaluation framework slug (e.g. "undp", "lambda", "ds-moz")
+        doc_type: Document type — must be one of the valid doc_types (see registry)
 
     Returns:
-        {success, donor, doc_type, template_document_id, total_sections, required_sections,
+        {success, framework, doc_type, template_document_id, total_sections, required_sections,
          present_count, partial_count, missing_count, verdict, sections, missing_required}
         verdict is "complete" (0 missing required) or "incomplete" (>0 missing required)
         Each section entry includes: name, required, status (present|partial|missing), coverage_score
     """
     from src.tools.templates import check_structure as _check
-    return _check(text=text, donor=donor, doc_type=doc_type)
+    return _check(text=text, framework=framework, doc_type=doc_type)
 
 
 @mcp.tool()
@@ -966,12 +967,12 @@ def list_templates() -> dict:
     """
     Return all stored document templates.
 
-    Use this to see which donor+doc_type combinations have templates stored,
+    Use this to see which framework+doc_type combinations have templates stored,
     before calling check_structure().
 
     Returns:
-        {success, templates: [{donor, doc_type, section_count, document_id}], total}
-        Sorted alphabetically by donor then doc_type.
+        {success, templates: [{framework, doc_type, section_count, document_id}], total}
+        Sorted alphabetically by framework then doc_type.
     """
     from src.tools.templates import list_templates as _list
     return _list()

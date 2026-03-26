@@ -14,7 +14,7 @@ def test_add_rubric_criterion_success():
     with patch("src.tools.rubrics.index_document", return_value=mock_point_ids):
         from src.tools.rubrics import add_rubric_criterion
         result = add_rubric_criterion(
-            donor="usaid",
+            framework="usaid",
             section="technical-approach",
             criterion="The proposal clearly articulates a theory of change linking activities to outcomes.",
             weight=1.5,
@@ -26,15 +26,24 @@ def test_add_rubric_criterion_success():
     assert "collection" in result
 
 
-def test_add_rubric_criterion_invalid_donor():
+def test_add_rubric_criterion_any_framework_slug_is_valid():
+    """Any non-empty lowercase slug is now accepted — worldbank, lambda, oca-2025, etc."""
+    mock_point_ids = [str(uuid4())]
+    with patch("src.tools.rubrics.index_document", return_value=mock_point_ids):
+        from src.tools.rubrics import add_rubric_criterion
+        result = add_rubric_criterion(
+            framework="worldbank",
+            section="technical-approach",
+            criterion="Some criterion text.",
+        )
+    assert result["success"] is True
+
+
+def test_add_rubric_criterion_empty_framework_rejected():
     from src.tools.rubrics import add_rubric_criterion
-    result = add_rubric_criterion(
-        donor="worldbank",
-        section="technical-approach",
-        criterion="Some criterion text.",
-    )
+    result = add_rubric_criterion(framework="", section="technical-approach", criterion="Text.")
     assert result["success"] is False
-    assert "donor" in result["error"].lower()
+    assert "framework" in result["error"].lower()
 
 
 def test_add_rubric_criterion_weight_clamping_below():
@@ -48,7 +57,7 @@ def test_add_rubric_criterion_weight_clamping_below():
     with patch("src.tools.rubrics.index_document", side_effect=fake_index_document):
         from src.tools.rubrics import add_rubric_criterion
         result = add_rubric_criterion(
-            donor="undp",
+            framework="undp",
             section="results-framework",
             criterion="SMART indicators are defined with baselines and targets.",
             weight=-5.0,  # should be clamped to 0.1
@@ -68,7 +77,7 @@ def test_add_rubric_criterion_weight_clamping_above():
     with patch("src.tools.rubrics.index_document", side_effect=fake_index_document):
         from src.tools.rubrics import add_rubric_criterion
         result = add_rubric_criterion(
-            donor="eu",
+            framework="eu",
             section="relevance",
             criterion="The proposal demonstrates added value over existing interventions.",
             weight=99.0,  # should be clamped to 2.0
@@ -79,17 +88,17 @@ def test_add_rubric_criterion_weight_clamping_above():
 
 def test_add_rubric_criterion_empty_criterion():
     from src.tools.rubrics import add_rubric_criterion
-    result = add_rubric_criterion(donor="usaid", section="technical-approach", criterion="")
+    result = add_rubric_criterion(framework="usaid", section="technical-approach", criterion="")
     assert result["success"] is False
     assert "criterion" in result["error"].lower()
 
 
-def test_add_rubric_criterion_donor_case_insensitive():
+def test_add_rubric_criterion_framework_normalised_to_lowercase():
     mock_point_ids = [str(uuid4())]
     with patch("src.tools.rubrics.index_document", return_value=mock_point_ids):
         from src.tools.rubrics import add_rubric_criterion
         result = add_rubric_criterion(
-            donor="USAID",  # uppercase — should be normalised
+            framework="USAID",  # uppercase — should be normalised
             section="technical-approach",
             criterion="Theory of change is clearly articulated.",
         )
@@ -108,7 +117,7 @@ def _make_search_result(criterion_text, score, weight, section="technical-approa
         "title": f"[USAID | {section}] {criterion_text[:60]}",
         "text": criterion_text,
         "metadata": {
-            "donor": "usaid",
+            "framework": "usaid",
             "section": section,
             "weight": weight,
             "red_flags": ["vague"],
@@ -126,11 +135,11 @@ def test_score_against_rubric_success_with_weighted_scores():
         from src.tools.rubrics import score_against_rubric
         result = score_against_rubric(
             text="Our theory of change is clearly articulated with measurable outcomes.",
-            donor="usaid",
+            framework="usaid",
             section="technical-approach",
         )
     assert result["success"] is True
-    assert result["donor"] == "usaid"
+    assert result["framework"] == "usaid"
     assert result["criteria_matched"] == 2
     # weighted average: (0.8*1.5 + 0.6*1.0) / (1.5 + 1.0) = 1.8 / 2.5 = 0.72
     assert result["overall_score"] == round((0.8 * 1.5 + 0.6 * 1.0) / (1.5 + 1.0), 4)
@@ -146,7 +155,7 @@ def test_score_against_rubric_verdict_adequate():
     ]
     with patch("src.tools.rubrics.semantic_search", return_value=mock_results):
         from src.tools.rubrics import score_against_rubric
-        result = score_against_rubric(text="Some proposal text.", donor="eu")
+        result = score_against_rubric(text="Some proposal text.", framework="eu")
     assert result["success"] is True
     assert result["verdict"] == "adequate"
 
@@ -157,22 +166,22 @@ def test_score_against_rubric_verdict_weak():
     ]
     with patch("src.tools.rubrics.semantic_search", return_value=mock_results):
         from src.tools.rubrics import score_against_rubric
-        result = score_against_rubric(text="Vague proposal text.", donor="undp")
+        result = score_against_rubric(text="Vague proposal text.", framework="undp")
     assert result["success"] is True
     assert result["verdict"] == "weak"
 
 
-def test_score_against_rubric_invalid_donor():
+def test_score_against_rubric_empty_framework_rejected():
     from src.tools.rubrics import score_against_rubric
-    result = score_against_rubric(text="Some text.", donor="idb")
+    result = score_against_rubric(text="Some text.", framework="")
     assert result["success"] is False
-    assert "donor" in result["error"].lower()
+    assert "framework" in result["error"].lower()
 
 
 def test_score_against_rubric_no_criteria_found():
     with patch("src.tools.rubrics.semantic_search", return_value=[]):
         from src.tools.rubrics import score_against_rubric
-        result = score_against_rubric(text="Proposal text.", donor="global-fund", section="governance")
+        result = score_against_rubric(text="Proposal text.", framework="global-fund", section="governance")
     assert result["success"] is False
     assert "global-fund" in result["error"]
 
@@ -180,16 +189,16 @@ def test_score_against_rubric_no_criteria_found():
 def test_score_against_rubric_section_filter_passed_to_search():
     with patch("src.tools.rubrics.semantic_search", return_value=[]) as mock_search:
         from src.tools.rubrics import score_against_rubric
-        score_against_rubric(text="Proposal text.", donor="usaid", section="sustainability")
+        score_against_rubric(text="Proposal text.", framework="usaid", section="sustainability")
     call_kwargs = mock_search.call_args[1]
-    assert call_kwargs["filter_conditions"]["donor"] == "usaid"
+    assert call_kwargs["filter_conditions"]["framework"] == "usaid"
     assert call_kwargs["filter_conditions"]["section"] == "sustainability"
 
 
 def test_score_against_rubric_no_section_filter_omits_section_key():
     with patch("src.tools.rubrics.semantic_search", return_value=[]) as mock_search:
         from src.tools.rubrics import score_against_rubric
-        score_against_rubric(text="Proposal text.", donor="usaid")
+        score_against_rubric(text="Proposal text.", framework="usaid")
     call_kwargs = mock_search.call_args[1]
     assert "section" not in call_kwargs["filter_conditions"]
 
@@ -202,7 +211,7 @@ def test_score_against_rubric_doc_context_included_in_return():
         from src.tools.rubrics import score_against_rubric
         result = score_against_rubric(
             text="Our annual report narrative.",
-            donor="general",
+            framework="general",
             doc_context="annual report",
         )
     assert result["success"] is True
@@ -211,58 +220,58 @@ def test_score_against_rubric_doc_context_included_in_return():
 
 
 # ---------------------------------------------------------------------------
-# list_rubric_donors
+# list_rubric_frameworks
 # ---------------------------------------------------------------------------
 
-def test_list_rubric_donors_returns_correct_counts():
+def test_list_rubric_frameworks_returns_correct_counts():
     points = [
-        _make_mock_point({"donor": "usaid", "entry_type": "rubric_criterion"}),
-        _make_mock_point({"donor": "usaid", "entry_type": "rubric_criterion"}),
-        _make_mock_point({"donor": "undp", "entry_type": "rubric_criterion"}),
-        _make_mock_point({"donor": "eu", "entry_type": "rubric_criterion"}),
+        _make_mock_point({"framework": "usaid", "entry_type": "rubric_criterion"}),
+        _make_mock_point({"framework": "usaid", "entry_type": "rubric_criterion"}),
+        _make_mock_point({"framework": "undp", "entry_type": "rubric_criterion"}),
+        _make_mock_point({"framework": "eu", "entry_type": "rubric_criterion"}),
     ]
     mock_client = _make_mock_qdrant_client((points, None))
 
     with patch("src.tools.rubrics.get_qdrant_client", return_value=mock_client):
-        from src.tools.rubrics import list_rubric_donors
-        result = list_rubric_donors()
+        from src.tools.rubrics import list_rubric_frameworks
+        result = list_rubric_frameworks()
 
     assert result["success"] is True
-    assert result["total_donors"] == 3
+    assert result["total_frameworks"] == 3
     assert result["total_criteria"] == 4
 
-    donor_map = {d["donor"]: d["criterion_count"] for d in result["donors"]}
+    donor_map = {d["framework"]: d["criterion_count"] for d in result["frameworks"]}
     assert donor_map["usaid"] == 2
     assert donor_map["undp"] == 1
     assert donor_map["eu"] == 1
 
 
-def test_list_rubric_donors_sorted_alphabetically():
+def test_list_rubric_frameworks_sorted_alphabetically():
     points = [
-        _make_mock_point({"donor": "usaid"}),
-        _make_mock_point({"donor": "eu"}),
-        _make_mock_point({"donor": "undp"}),
-        _make_mock_point({"donor": "global-fund"}),
+        _make_mock_point({"framework": "usaid"}),
+        _make_mock_point({"framework": "eu"}),
+        _make_mock_point({"framework": "undp"}),
+        _make_mock_point({"framework": "global-fund"}),
     ]
     mock_client = _make_mock_qdrant_client((points, None))
 
     with patch("src.tools.rubrics.get_qdrant_client", return_value=mock_client):
-        from src.tools.rubrics import list_rubric_donors
-        result = list_rubric_donors()
+        from src.tools.rubrics import list_rubric_frameworks
+        result = list_rubric_frameworks()
 
     assert result["success"] is True
-    names = [d["donor"] for d in result["donors"]]
+    names = [d["framework"] for d in result["frameworks"]]
     assert names == sorted(names)
 
 
-def test_list_rubric_donors_empty_collection():
+def test_list_rubric_frameworks_empty_collection():
     mock_client = _make_mock_qdrant_client(([], None))
 
     with patch("src.tools.rubrics.get_qdrant_client", return_value=mock_client):
-        from src.tools.rubrics import list_rubric_donors
-        result = list_rubric_donors()
+        from src.tools.rubrics import list_rubric_frameworks
+        result = list_rubric_frameworks()
 
     assert result["success"] is True
-    assert result["total_donors"] == 0
+    assert result["total_frameworks"] == 0
     assert result["total_criteria"] == 0
-    assert result["donors"] == []
+    assert result["frameworks"] == []

@@ -28,7 +28,7 @@ def seed():
     templates = [
         # UNDP — concept-note
         dict(
-            donor="undp",
+            framework="undp",
             doc_type="concept-note",
             sections=[
                 {
@@ -71,7 +71,7 @@ def seed():
         ),
         # Global Fund — concept-note
         dict(
-            donor="global-fund",
+            framework="global-fund",
             doc_type="concept-note",
             sections=[
                 {
@@ -120,7 +120,7 @@ def seed():
         ),
         # USAID — full-proposal
         dict(
-            donor="usaid",
+            framework="usaid",
             doc_type="full-proposal",
             sections=[
                 {
@@ -157,7 +157,7 @@ def seed():
         ),
         # EU — eoi
         dict(
-            donor="eu",
+            framework="eu",
             doc_type="eoi",
             sections=[
                 {
@@ -188,7 +188,7 @@ def seed():
         ),
         # General — monitoring-report
         dict(
-            donor="general",
+            framework="general",
             doc_type="monitoring-report",
             sections=[
                 {
@@ -237,7 +237,7 @@ def seed():
         ),
         # General — assessment
         dict(
-            donor="general",
+            framework="general",
             doc_type="assessment",
             sections=[
                 {
@@ -280,7 +280,7 @@ def seed():
         ),
         # General — tor (Terms of Reference)
         dict(
-            donor="general",
+            framework="general",
             doc_type="tor",
             sections=[
                 {
@@ -329,7 +329,7 @@ def seed():
         ),
         # General — governance-review
         dict(
-            donor="general",
+            framework="general",
             doc_type="governance-review",
             sections=[
                 {
@@ -382,15 +382,15 @@ def seed():
     failed = 0
 
     for tmpl in templates:
-        donor = tmpl["donor"]
+        framework = tmpl["framework"]
         doc_type = tmpl["doc_type"]
         sections = tmpl["sections"]
-        result = add_template(donor=donor, doc_type=doc_type, sections=sections)
+        result = add_template(framework=framework, doc_type=doc_type, sections=sections)
         if result.get("success"):
-            print(f"  [OK] {donor} / {doc_type} — {result['section_count']} sections")
+            print(f"  [OK] {framework} / {doc_type} — {result['section_count']} sections")
             succeeded += 1
         else:
-            print(f"  [FAIL] {donor} / {doc_type} — {result.get('error')}")
+            print(f"  [FAIL] {framework} / {doc_type} — {result.get('error')}")
             failed += 1
 
     print(f"\nDone. {succeeded} templates added, {failed} failed.")

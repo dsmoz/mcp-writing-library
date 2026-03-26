@@ -30,33 +30,46 @@ def test_add_template_success():
     with patch("src.tools.templates.index_document", return_value=mock_point_ids):
         from src.tools.templates import add_template
         result = add_template(
-            donor="undp",
+            framework="undp",
             doc_type="concept-note",
             sections=_valid_sections(3),
         )
     assert result["success"] is True
     assert "document_id" in result
     assert result["chunks_created"] == 2
-    assert result["donor"] == "undp"
+    assert result["framework"] == "undp"
     assert result["doc_type"] == "concept-note"
     assert result["section_count"] == 3
 
 
-def test_add_template_invalid_donor():
+def test_add_template_empty_framework_rejected():
     from src.tools.templates import add_template
     result = add_template(
-        donor="worldbank",
+        framework="",
         doc_type="concept-note",
         sections=_valid_sections(2),
     )
     assert result["success"] is False
-    assert "donor" in result["error"].lower()
+    assert "framework" in result["error"].lower()
+
+
+def test_add_template_any_framework_slug_is_valid():
+    """Non-standard slugs like 'lambda' or 'oca-2025' are now accepted."""
+    mock_point_ids = [str(uuid4())]
+    with patch("src.tools.templates.index_document", return_value=mock_point_ids):
+        from src.tools.templates import add_template
+        result = add_template(
+            framework="lambda",
+            doc_type="concept-note",
+            sections=_valid_sections(2),
+        )
+    assert result["success"] is True
 
 
 def test_add_template_invalid_doc_type():
     from src.tools.templates import add_template
     result = add_template(
-        donor="undp",
+        framework="undp",
         doc_type="grant-application",
         sections=_valid_sections(2),
     )
@@ -66,7 +79,7 @@ def test_add_template_invalid_doc_type():
 
 def test_add_template_empty_sections():
     from src.tools.templates import add_template
-    result = add_template(donor="usaid", doc_type="full-proposal", sections=[])
+    result = add_template(framework="usaid", doc_type="full-proposal", sections=[])
     assert result["success"] is False
     assert "section" in result["error"].lower()
 
@@ -74,7 +87,7 @@ def test_add_template_empty_sections():
 def test_add_template_section_missing_name():
     from src.tools.templates import add_template
     result = add_template(
-        donor="eu",
+        framework="eu",
         doc_type="eoi",
         sections=[{"description": "A description without name", "required": True}],
     )
@@ -85,7 +98,7 @@ def test_add_template_section_missing_name():
 def test_add_template_section_missing_description():
     from src.tools.templates import add_template
     result = add_template(
-        donor="eu",
+        framework="eu",
         doc_type="eoi",
         sections=[{"name": "Relevance"}],
     )
@@ -93,17 +106,17 @@ def test_add_template_section_missing_description():
     assert "description" in result["error"].lower()
 
 
-def test_add_template_donor_case_insensitive():
+def test_add_template_framework_normalised_to_lowercase():
     mock_point_ids = [str(uuid4())]
     with patch("src.tools.templates.index_document", return_value=mock_point_ids):
         from src.tools.templates import add_template
         result = add_template(
-            donor="UNDP",
+            framework="UNDP",
             doc_type="concept-note",
             sections=_valid_sections(2),
         )
     assert result["success"] is True
-    assert result["donor"] == "undp"
+    assert result["framework"] == "undp"
 
 
 def test_add_template_section_defaults_applied():
@@ -118,7 +131,7 @@ def test_add_template_section_defaults_applied():
     with patch("src.tools.templates.index_document", side_effect=fake_index):
         from src.tools.templates import add_template
         add_template(
-            donor="usaid",
+            framework="usaid",
             doc_type="full-proposal",
             sections=[
                 {"name": "Technical Approach", "description": "Methodology"},
@@ -136,7 +149,7 @@ def test_add_template_section_defaults_applied():
 def test_add_template_kbase_unavailable():
     from src.tools.templates import add_template
     with patch("src.tools.templates.index_document", None):
-        result = add_template(donor="undp", doc_type="concept-note", sections=_valid_sections(2))
+        result = add_template(framework="undp", doc_type="concept-note", sections=_valid_sections(2))
     assert result["success"] is False
     assert "kbase" in result["error"].lower()
 
@@ -145,16 +158,16 @@ def test_add_template_kbase_unavailable():
 # check_structure
 # ---------------------------------------------------------------------------
 
-def _make_template_search_result(donor, doc_type, sections):
+def _make_template_search_result(framework, doc_type, sections):
     doc_id = str(uuid4())
     return {
         "id": str(uuid4()),
         "score": 0.9,
         "document_id": doc_id,
-        "title": f"[{donor.upper()} | {doc_type}] Template",
+        "title": f"[{framework.upper()} | {doc_type}] Template",
         "text": " ".join(f"{s['name']}: {s['description']}" for s in sections),
         "metadata": {
-            "donor": donor,
+            "framework": framework,
             "doc_type": doc_type,
             "sections": sections,
             "section_count": len(sections),
@@ -168,7 +181,7 @@ def test_check_structure_no_template_found():
         from src.tools.templates import check_structure
         result = check_structure(
             text="Some proposal text.",
-            donor="usaid",
+            framework="usaid",
             doc_type="concept-note",
         )
     assert result["success"] is False
@@ -176,16 +189,16 @@ def test_check_structure_no_template_found():
     assert "concept-note" in result["error"]
 
 
-def test_check_structure_invalid_donor():
+def test_check_structure_empty_framework_rejected():
     from src.tools.templates import check_structure
-    result = check_structure(text="Some text.", donor="idb", doc_type="concept-note")
+    result = check_structure(text="Some text.", framework="", doc_type="concept-note")
     assert result["success"] is False
-    assert "donor" in result["error"].lower()
+    assert "framework" in result["error"].lower()
 
 
 def test_check_structure_invalid_doc_type():
     from src.tools.templates import check_structure
-    result = check_structure(text="Some text.", donor="undp", doc_type="brochure")
+    result = check_structure(text="Some text.", framework="undp", doc_type="brochure")
     assert result["success"] is False
     assert "doc_type" in result["error"].lower()
 
@@ -211,10 +224,10 @@ def test_check_structure_complete_verdict():
         with patch("src.tools.templates._embedding_available", False):
             with patch("src.tools.templates._generate_embedding", None):
                 from src.tools.templates import check_structure
-                result = check_structure(text=draft, donor="undp", doc_type="concept-note")
+                result = check_structure(text=draft, framework="undp", doc_type="concept-note")
 
     assert result["success"] is True
-    assert result["donor"] == "undp"
+    assert result["framework"] == "undp"
     assert result["doc_type"] == "concept-note"
     assert result["total_sections"] == 2
     assert result["required_sections"] == 2
@@ -244,7 +257,7 @@ def test_check_structure_incomplete_verdict():
         with patch("src.tools.templates._embedding_available", False):
             with patch("src.tools.templates._generate_embedding", None):
                 from src.tools.templates import check_structure
-                result = check_structure(text=draft, donor="undp", doc_type="concept-note")
+                result = check_structure(text=draft, framework="undp", doc_type="concept-note")
 
     assert result["success"] is True
     assert result["verdict"] == "incomplete"
@@ -264,7 +277,7 @@ def test_check_structure_returns_section_detail():
         with patch("src.tools.templates._embedding_available", False):
             with patch("src.tools.templates._generate_embedding", None):
                 from src.tools.templates import check_structure
-                result = check_structure(text=draft, donor="usaid", doc_type="full-proposal")
+                result = check_structure(text=draft, framework="usaid", doc_type="full-proposal")
 
     assert result["success"] is True
     assert len(result["sections"]) == 1
@@ -295,7 +308,7 @@ def test_check_structure_with_embedding_success():
         with patch("src.tools.templates._embedding_available", True):
             with patch("src.tools.templates._generate_embedding", return_value=fake_embedding):
                 from src.tools.templates import check_structure
-                result = check_structure(text=draft, donor="eu", doc_type="eoi")
+                result = check_structure(text=draft, framework="eu", doc_type="eoi")
 
     assert result["success"] is True
     # With identical embeddings for all texts, cosine sim = 1.0 → "present"
@@ -307,7 +320,7 @@ def test_check_structure_with_embedding_success():
 def test_check_structure_kbase_unavailable():
     from src.tools.templates import check_structure
     with patch("src.tools.templates.semantic_search", None):
-        result = check_structure(text="Some text.", donor="undp", doc_type="concept-note")
+        result = check_structure(text="Some text.", framework="undp", doc_type="concept-note")
     assert result["success"] is False
     assert "kbase" in result["error"].lower()
 
@@ -315,11 +328,11 @@ def test_check_structure_kbase_unavailable():
 def test_check_structure_empty_text():
     """Empty or whitespace-only text should return early with an error."""
     from src.tools.templates import check_structure
-    result = check_structure(text="", donor="undp", doc_type="concept-note")
+    result = check_structure(text="", framework="undp", doc_type="concept-note")
     assert result["success"] is False
     assert "empty" in result["error"].lower()
 
-    result_ws = check_structure(text="   \n\n  ", donor="undp", doc_type="concept-note")
+    result_ws = check_structure(text="   \n\n  ", framework="undp", doc_type="concept-note")
     assert result_ws["success"] is False
     assert "empty" in result_ws["error"].lower()
 
@@ -352,7 +365,7 @@ def test_check_structure_per_section_embedding_fallback():
         with patch("src.tools.templates._embedding_available", True):
             with patch("src.tools.templates._generate_embedding", side_effect=embedding_side_effect):
                 from src.tools.templates import check_structure
-                result = check_structure(text=draft, donor="undp", doc_type="concept-note")
+                result = check_structure(text=draft, framework="undp", doc_type="concept-note")
 
     assert result["success"] is True
     # Top-level scoring_method must be 'mixed' (one embedding, one keyword)
@@ -382,7 +395,7 @@ def test_check_structure_keyword_thresholds():
         with patch("src.tools.templates._embedding_available", False):
             with patch("src.tools.templates._generate_embedding", None):
                 from src.tools.templates import check_structure
-                result = check_structure(text=draft, donor="eu", doc_type="eoi")
+                result = check_structure(text=draft, framework="eu", doc_type="eoi")
 
     assert result["success"] is True
     sec = result["sections"][0]
@@ -399,21 +412,21 @@ def test_list_templates_returns_sorted_list():
     points = [
         _make_mock_point({
             "entry_type": "template",
-            "donor": "usaid",
+            "framework": "usaid",
             "doc_type": "full-proposal",
             "section_count": 5,
             "document_id": str(uuid4()),
         }),
         _make_mock_point({
             "entry_type": "template",
-            "donor": "eu",
+            "framework": "eu",
             "doc_type": "eoi",
             "section_count": 4,
             "document_id": str(uuid4()),
         }),
         _make_mock_point({
             "entry_type": "template",
-            "donor": "undp",
+            "framework": "undp",
             "doc_type": "concept-note",
             "section_count": 6,
             "document_id": str(uuid4()),
@@ -427,8 +440,8 @@ def test_list_templates_returns_sorted_list():
 
     assert result["success"] is True
     assert result["total"] == 3
-    donors = [t["donor"] for t in result["templates"]]
-    assert donors == sorted(donors)
+    frameworks = [t["framework"] for t in result["templates"]]
+    assert frameworks == sorted(frameworks)
 
 
 def test_list_templates_empty_collection():
@@ -448,14 +461,14 @@ def test_list_templates_filters_non_template_entries():
     points = [
         _make_mock_point({
             "entry_type": "template",
-            "donor": "undp",
+            "framework": "undp",
             "doc_type": "concept-note",
             "section_count": 6,
             "document_id": str(uuid4()),
         }),
         _make_mock_point({
             "entry_type": "rubric_criterion",
-            "donor": "undp",
+            "framework": "undp",
             "section": "results",
         }),
     ]
@@ -467,7 +480,7 @@ def test_list_templates_filters_non_template_entries():
 
     assert result["success"] is True
     assert result["total"] == 1
-    assert result["templates"][0]["donor"] == "undp"
+    assert result["templates"][0]["framework"] == "undp"
 
 
 def test_list_templates_kbase_unavailable():

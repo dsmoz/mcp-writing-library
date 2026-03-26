@@ -9,8 +9,8 @@ from src.tools.collections import get_collection_names
 
 logger = structlog.get_logger(__name__)
 
-# Donor is a free-form label — no closed enum. Use lowercase slugs (e.g. "lambda",
-# "usaid", "undp", "oca-2025"). list_rubric_donors() discovers all stored values.
+# framework is a free-form label — no closed enum. Use lowercase slugs (e.g. "lambda",
+# "usaid", "undp", "oca-2025", "ds-moz-editorial"). list_rubric_frameworks() discovers all stored values.
 
 try:
     from kbase.vector.sync_indexing import index_document
@@ -23,7 +23,7 @@ except ImportError:
 
 
 def add_rubric_criterion(
-    donor: str,
+    framework: str,
     section: str,
     criterion: str,
     weight: float = 1.0,
@@ -33,7 +33,7 @@ def add_rubric_criterion(
     Store one evaluation criterion in the writing_rubrics Qdrant collection.
 
     Args:
-        donor: Donor name — must be one of: usaid, undp, global-fund, eu, general
+        framework: Evaluation framework slug — any lowercase slug (e.g. "usaid", "undp", "lambda", "oca-2025")
         section: Section name (e.g. 'technical-approach', 'financial-management', 'methodology')
         criterion: The criterion description (what evaluators look for)
         weight: Relative importance 0.1–2.0 (default 1.0)
@@ -42,9 +42,9 @@ def add_rubric_criterion(
     Returns:
         {success, document_id, chunks_created, collection} on success
     """
-    donor = donor.lower().strip()
-    if not donor:
-        return {"success": False, "error": "donor cannot be empty"}
+    framework = framework.lower().strip()
+    if not framework:
+        return {"success": False, "error": "framework cannot be empty"}
 
     if not criterion or not criterion.strip():
         return {"success": False, "error": "criterion cannot be empty"}
@@ -60,9 +60,9 @@ def add_rubric_criterion(
 
     document_id = str(uuid4())
     collection = get_collection_names()["rubrics"]
-    title = f"[{donor.upper()} | {section}] {criterion[:60]}"
+    title = f"[{framework.upper()} | {section}] {criterion[:60]}"
     metadata = {
-        "donor": donor,
+        "framework": framework,
         "section": section,
         "weight": weight,
         "red_flags": red_flags or [],
@@ -91,38 +91,38 @@ def add_rubric_criterion(
 
 def score_against_rubric(
     text: str,
-    donor: str,
+    framework: str,
     section: Optional[str] = None,
     top_k: int = 5,
     doc_context: str = None,
 ) -> dict:
     """
-    Score a document section against all stored criteria for a given donor.
+    Score a document section against all stored criteria for a given framework.
 
     Args:
         text: Document section to score
-        donor: Donor name to filter criteria
+        framework: Donor name to filter criteria
         section: Optional section filter (e.g. "technical-approach")
         top_k: Number of criteria to match (default 5)
         doc_context: Optional free-text context about the document type (e.g. "annual report").
             Not stored — informational only.
 
     Returns:
-        {success, donor, section, text_length, criteria_matched, overall_score,
+        {success, framework, section, text_length, criteria_matched, overall_score,
          verdict, criteria, doc_context} on success
     """
     if doc_context:
         logger.debug("score_against_rubric context", doc_context=doc_context)
-    donor = donor.lower().strip()
-    if not donor:
-        return {"success": False, "error": "donor cannot be empty"}
+    framework = framework.lower().strip()
+    if not framework:
+        return {"success": False, "error": "framework cannot be empty"}
 
     if semantic_search is None:
         return {"success": False, "error": "kbase library is not available"}
 
     collection = get_collection_names()["rubrics"]
 
-    filter_conditions: dict = {"donor": donor}
+    filter_conditions: dict = {"framework": framework}
     if section:
         filter_conditions["section"] = section
 
@@ -141,7 +141,7 @@ def score_against_rubric(
         section_info = f" and section '{section}'" if section else ""
         return {
             "success": False,
-            "error": f"No rubric criteria found for donor '{donor}'{section_info}. Add criteria first with add_rubric_criterion().",
+            "error": f"No rubric criteria found for framework '{framework}'{section_info}. Add criteria first with add_rubric_criterion().",
         }
 
     criteria = []
@@ -179,7 +179,7 @@ def score_against_rubric(
 
     return {
         "success": True,
-        "donor": donor,
+        "framework": framework,
         "section": section,
         "text_length": len(text),
         "criteria_matched": len(criteria),
@@ -190,12 +190,12 @@ def score_against_rubric(
     }
 
 
-def list_rubric_donors() -> dict:
+def list_rubric_frameworks() -> dict:
     """
-    Return all donors that have at least one criterion stored.
+    Return all frameworks that have at least one criterion stored.
 
     Returns:
-        {success, donors: [{donor, criterion_count}], total_donors, total_criteria}
+        {success, frameworks: [{framework, criterion_count}], total_frameworks, total_criteria}
     """
     if get_qdrant_client is None:
         return {"success": False, "error": "kbase library is not available"}
@@ -204,7 +204,7 @@ def list_rubric_donors() -> dict:
 
     try:
         client = get_qdrant_client()
-        donor_counts: dict[str, int] = {}
+        framework_counts: dict[str, int] = {}
         offset = None
 
         while True:
@@ -217,26 +217,26 @@ def list_rubric_donors() -> dict:
             )
             for point in results:
                 payload = point.payload or {}
-                donor = payload.get("donor")
-                if donor:
-                    donor_counts[donor] = donor_counts.get(donor, 0) + 1
+                framework = payload.get("framework")
+                if framework:
+                    framework_counts[framework] = framework_counts.get(framework, 0) + 1
 
             if next_offset is None:
                 break
             offset = next_offset
 
-        donors = sorted(
-            [{"donor": d, "criterion_count": c} for d, c in donor_counts.items()],
-            key=lambda x: x["donor"],
+        frameworks = sorted(
+            [{"framework": d, "criterion_count": c} for d, c in framework_counts.items()],
+            key=lambda x: x["framework"],
         )
 
         return {
             "success": True,
-            "donors": donors,
-            "total_donors": len(donors),
-            "total_criteria": sum(donor_counts.values()),
+            "frameworks": frameworks,
+            "total_frameworks": len(frameworks),
+            "total_criteria": sum(framework_counts.values()),
         }
 
     except Exception as e:
-        logger.error("list_rubric_donors failed", error=str(e))
+        logger.error("list_rubric_frameworks failed", error=str(e))
         return {"success": False, "error": str(e)}
