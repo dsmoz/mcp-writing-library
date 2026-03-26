@@ -36,6 +36,7 @@ def search_passages(
     language: Optional[str] = None,
     domain: Optional[str] = None,
     style: Optional[str] = None,
+    rubric_section: Optional[str] = None,
     top_k: int = 5,
 ) -> dict:
     """
@@ -54,13 +55,20 @@ def search_passages(
                undp|global-fund|danilo-voice|
                ai-sounding|bureaucratic|jargon-heavy
                Call list_styles() to see descriptions.
+        rubric_section: Filter by donor rubric section (e.g. "results-framework",
+                        "technical-approach", "sustainability", "community-led").
+                        Retrieves model passages for the specific section you are trying to strengthen.
         top_k: Number of results (default 5, max 20)
 
     Returns:
-        List of matching passages with scores, quality notes, tags, and style labels
+        List of matching passages with scores, quality notes, tags, style labels,
+        and rubric_section where present
     """
     from src.tools.passages import search_passages as _search
-    return _search(query=query, doc_type=doc_type, language=language, domain=domain, style=style, top_k=top_k)
+    return _search(
+        query=query, doc_type=doc_type, language=language, domain=domain,
+        style=style, rubric_section=rubric_section, top_k=top_k,
+    )
 
 
 @mcp.tool()
@@ -73,6 +81,7 @@ def add_passage(
     tags: Optional[List[str]] = None,
     source: str = "manual",
     style: Optional[List[str]] = None,
+    rubric_section: Optional[str] = None,
 ) -> dict:
     """
     Store an exemplary writing passage in the library.
@@ -91,6 +100,10 @@ def add_passage(
         style: Style labels e.g. ["narrative", "donor-facing"].
                Call list_styles() to see all valid values.
                Unknown values are warned but do not block the save.
+        rubric_section: Optional donor rubric section this passage models
+                        (e.g. "results-framework", "technical-approach", "sustainability").
+                        Enables retrieval via search_passages(rubric_section=...) to find
+                        model passages for a specific section you are trying to strengthen.
 
     Returns:
         document_id, chunks_created, and warnings on success
@@ -99,7 +112,7 @@ def add_passage(
     return _add(
         text=text, doc_type=doc_type, language=language, domain=domain,
         quality_notes=quality_notes, tags=tags or [], source=source,
-        style=style or [],
+        style=style or [], rubric_section=rubric_section,
     )
 
 
@@ -182,6 +195,49 @@ def add_term(
     return _add(
         preferred=preferred, avoid=avoid, domain=domain, language=language,
         why=why, example_bad=example_bad, example_good=example_good,
+    )
+
+
+@mcp.tool()
+def record_correction(
+    original: str,
+    corrected: str,
+    issue_type: str,
+    doc_type: str = "general",
+    language: str = "en",
+    domain: str = "general",
+    source: str = "manual",
+) -> dict:
+    """
+    Store a before/after correction pair so the library learns from real edits.
+
+    Call this whenever an AI-generated or poor passage is rewritten. The original
+    is stored tagged 'ai-corrected' (negative example); the corrected version is
+    stored tagged 'human-corrected' (positive example). Both share a correction_id
+    so they can be retrieved as a pair.
+
+    Over time these pairs feed score_semantic_ai_likelihood() — the more corrections
+    are stored, the stronger the semantic signal for what DS-MOZ prose looks like
+    when fixed versus when it reads as AI-generated.
+
+    Args:
+        original: The original (poor/AI-sounding) passage
+        corrected: The improved replacement
+        issue_type: What was wrong — e.g. "ai-patterns", "passive-voice",
+                    "hollow-intensifier", "deficit-framing", "missing-connector"
+        doc_type: Document context: concept-note|report|tor|general|etc.
+        language: Language: en|pt
+        domain: Thematic area: srhr|governance|climate|general|m-and-e
+        source: Origin of the correction (e.g. "danilo-correction", "editorial-review")
+
+    Returns:
+        {success, correction_id, collection, original: {document_id, chunks_created},
+         corrected: {document_id, chunks_created}}
+    """
+    from src.tools.passages import record_correction as _record
+    return _record(
+        original=original, corrected=corrected, issue_type=issue_type,
+        doc_type=doc_type, language=language, domain=domain, source=source,
     )
 
 
@@ -888,6 +944,31 @@ def detect_authorship_shift(
     """
     from src.tools.consistency import detect_authorship_shift as _detect
     return _detect(text=text, min_segment_length=min_segment_length)
+
+
+@mcp.tool()
+def score_semantic_ai_likelihood(text: str, top_k: int = 10) -> dict:
+    """
+    Score how semantically similar text is to AI-corrected vs. human-corrected passages.
+
+    Complements score_ai_patterns() — where that tool catches known patterns by regex,
+    this tool catches novel AI-like prose by comparing embeddings against the correction
+    corpus built up through record_correction() calls.
+
+    Requires at least one passage stored with each label ('ai-corrected', 'human-corrected').
+    Returns method='insufficient_data' with a note when the corpus is too small.
+
+    Args:
+        text: The passage to score
+        top_k: Neighbours to retrieve per sub-corpus (default 10)
+
+    Returns:
+        {success, likelihood (0–1), verdict (human-like|ambiguous|ai-like),
+         ai_mean_similarity, human_mean_similarity, ai_sample_count,
+         human_sample_count, method ("semantic"|"insufficient_data")}
+    """
+    from src.tools.ai_patterns import score_semantic_ai_likelihood as _score
+    return _score(text=text, top_k=top_k)
 
 
 @mcp.tool()

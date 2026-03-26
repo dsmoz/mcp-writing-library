@@ -316,3 +316,155 @@ def test_batch_add_passages_per_item_validation_error_does_not_raise():
     assert result["success"] is True
     assert result["failed"] == 1
     assert "doc_type" in result["results"][0]["error"].lower()
+
+
+# ---------------------------------------------------------------------------
+# record_correction tests
+# ---------------------------------------------------------------------------
+
+def test_record_correction_stores_both_roles():
+    mock_point_ids = [str(uuid4())]
+    with patch("src.tools.passages.index_document", return_value=mock_point_ids) as mock_index:
+        from src.tools.passages import record_correction
+        result = record_correction(
+            original="Furthermore, it is important to note that the programme achieved results.",
+            corrected="The programme reached 3,400 people in 2024, exceeding the annual target.",
+            issue_type="hollow-intensifier",
+            doc_type="concept-note",
+            language="en",
+            domain="general",
+        )
+    assert result["success"] is True
+    assert "correction_id" in result
+    assert result["original"]["success"] is True
+    assert result["corrected"]["success"] is True
+    # Both roles must be indexed
+    assert mock_index.call_count == 2
+
+
+def test_record_correction_tags_roles_correctly():
+    call_metadatas = []
+
+    def capture_index(**kwargs):
+        call_metadatas.append(kwargs["metadata"])
+        return [str(uuid4())]
+
+    with patch("src.tools.passages.index_document", side_effect=capture_index):
+        from src.tools.passages import record_correction
+        record_correction(
+            original="AI-sounding text.",
+            corrected="Human-sounding text.",
+            issue_type="ai-patterns",
+        )
+
+    roles = {m["correction_role"] for m in call_metadatas}
+    styles = {m["style"][0] for m in call_metadatas}
+    assert roles == {"original", "corrected"}
+    assert styles == {"ai-corrected", "human-corrected"}
+
+
+def test_record_correction_shares_correction_id():
+    correction_ids = []
+
+    def capture_index(**kwargs):
+        correction_ids.append(kwargs["metadata"]["correction_id"])
+        return [str(uuid4())]
+
+    with patch("src.tools.passages.index_document", side_effect=capture_index):
+        from src.tools.passages import record_correction
+        record_correction(original="A.", corrected="B.", issue_type="passive-voice")
+
+    assert len(correction_ids) == 2
+    assert correction_ids[0] == correction_ids[1]
+
+
+def test_record_correction_validates_doc_type():
+    from src.tools.passages import record_correction
+    result = record_correction(original="A.", corrected="B.", issue_type="x", doc_type="bad-type")
+    assert result["success"] is False
+    assert "doc_type" in result["error"].lower()
+
+
+def test_record_correction_rejects_empty_original():
+    from src.tools.passages import record_correction
+    result = record_correction(original="", corrected="Good text.", issue_type="x")
+    assert result["success"] is False
+    assert "original" in result["error"].lower()
+
+
+def test_record_correction_rejects_empty_corrected():
+    from src.tools.passages import record_correction
+    result = record_correction(original="Some text.", corrected="", issue_type="x")
+    assert result["success"] is False
+    assert "corrected" in result["error"].lower()
+
+
+# ---------------------------------------------------------------------------
+# rubric_section tests
+# ---------------------------------------------------------------------------
+
+def test_add_passage_stores_rubric_section():
+    captured_metadata = {}
+
+    def capture_index(**kwargs):
+        captured_metadata.update(kwargs["metadata"])
+        return [str(uuid4())]
+
+    with patch("src.tools.passages.index_document", side_effect=capture_index):
+        from src.tools.passages import add_passage
+        result = add_passage(
+            text="Strong results framework passage.",
+            doc_type="concept-note",
+            language="en",
+            rubric_section="results-framework",
+        )
+    assert result["success"] is True
+    assert captured_metadata.get("rubric_section") == "results-framework"
+
+
+def test_add_passage_without_rubric_section_omits_key():
+    captured_metadata = {}
+
+    def capture_index(**kwargs):
+        captured_metadata.update(kwargs["metadata"])
+        return [str(uuid4())]
+
+    with patch("src.tools.passages.index_document", side_effect=capture_index):
+        from src.tools.passages import add_passage
+        add_passage(text="Some passage.", doc_type="report", language="en")
+    assert "rubric_section" not in captured_metadata
+
+
+def test_search_passages_filters_by_rubric_section():
+    with patch("src.tools.passages.semantic_search", return_value=[]) as mock_search:
+        from src.tools.passages import search_passages
+        search_passages(query="sustainability", rubric_section="sustainability")
+    call_kwargs = mock_search.call_args[1]
+    assert call_kwargs["filter_conditions"].get("rubric_section") == "sustainability"
+
+
+def test_search_passages_result_includes_rubric_section():
+    mock_results = [{
+        "id": str(uuid4()), "score": 0.88, "document_id": str(uuid4()),
+        "title": "Example", "text": "Passage text",
+        "metadata": {
+            "doc_type": "concept-note", "language": "en",
+            "rubric_section": "technical-approach",
+        },
+    }]
+    with patch("src.tools.passages.semantic_search", return_value=mock_results):
+        from src.tools.passages import search_passages
+        result = search_passages(query="technical approach")
+    assert result["results"][0].get("rubric_section") == "technical-approach"
+
+
+def test_search_passages_result_omits_rubric_section_when_absent():
+    mock_results = [{
+        "id": str(uuid4()), "score": 0.75, "document_id": str(uuid4()),
+        "title": "Example", "text": "Passage text",
+        "metadata": {"doc_type": "report", "language": "en"},
+    }]
+    with patch("src.tools.passages.semantic_search", return_value=mock_results):
+        from src.tools.passages import search_passages
+        result = search_passages(query="findings")
+    assert "rubric_section" not in result["results"][0]

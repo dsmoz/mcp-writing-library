@@ -47,6 +47,7 @@ def add_passage(
     tags: Optional[List[str]] = None,
     source: str = "manual",
     style: Optional[List[str]] = None,
+    rubric_section: Optional[str] = None,
 ) -> dict:
     """Store an exemplary writing passage in the writing_passages collection."""
     if doc_type not in VALID_DOC_TYPES:
@@ -85,6 +86,8 @@ def add_passage(
         "entry_type": "passage",
         "style": style,
     }
+    if rubric_section is not None:
+        metadata["rubric_section"] = rubric_section
 
     try:
         point_ids = index_document(
@@ -113,6 +116,7 @@ def search_passages(
     language: Optional[str] = None,
     domain: Optional[str] = None,
     style: Optional[str] = None,
+    rubric_section: Optional[str] = None,
     top_k: int = 5,
 ) -> dict:
     """Search for exemplary writing passages by semantic similarity."""
@@ -125,8 +129,10 @@ def search_passages(
         filter_conditions["language"] = language
     if domain:
         filter_conditions["domain"] = domain
+    if rubric_section:
+        filter_conditions["rubric_section"] = rubric_section
 
-    # Over-fetch when style filtering is needed (post-filter reduces result count)
+    # Over-fetch when style post-filtering is needed (reduces result count)
     fetch_k = top_k * 3 if style else top_k
 
     try:
@@ -139,19 +145,23 @@ def search_passages(
 
         results = []
         for r in raw_results:
-            results.append({
+            meta = r.get("metadata", {})
+            entry = {
                 "score": round(r["score"], 4),
                 "text": r.get("text", ""),
                 "title": r.get("title", ""),
-                "doc_type": r.get("metadata", {}).get("doc_type"),
-                "language": r.get("metadata", {}).get("language"),
-                "domain": r.get("metadata", {}).get("domain"),
-                "quality_notes": r.get("metadata", {}).get("quality_notes"),
-                "tags": r.get("metadata", {}).get("tags", []),
-                "style": r.get("metadata", {}).get("style", []),
-                "source": r.get("metadata", {}).get("source"),
+                "doc_type": meta.get("doc_type"),
+                "language": meta.get("language"),
+                "domain": meta.get("domain"),
+                "quality_notes": meta.get("quality_notes"),
+                "tags": meta.get("tags", []),
+                "style": meta.get("style", []),
+                "source": meta.get("source"),
                 "document_id": r.get("document_id"),
-            })
+            }
+            if meta.get("rubric_section"):
+                entry["rubric_section"] = meta["rubric_section"]
+            results.append(entry)
 
         # Post-filter by style — kbase-core uses MatchValue which cannot match list fields
         if style:
@@ -211,6 +221,7 @@ def batch_add_passages(items: list) -> dict:
             tags=item.get("tags"),
             source=item.get("source", "manual"),
             style=item.get("style"),
+            rubric_section=item.get("rubric_section"),
         )
         result["index"] = i
         results.append(result)
@@ -226,6 +237,88 @@ def batch_add_passages(items: list) -> dict:
         "succeeded": succeeded,
         "failed": failed,
         "results": results,
+    }
+
+
+def record_correction(
+    original: str,
+    corrected: str,
+    issue_type: str,
+    doc_type: str = "general",
+    language: str = "en",
+    domain: str = "general",
+    source: str = "manual",
+) -> dict:
+    """Store a before/after correction pair in the passages collection.
+
+    The original is tagged 'ai-corrected' (negative example).
+    The corrected version is tagged 'human-corrected' (positive example).
+    Both are stored with the same correction_id so they can be retrieved as a pair.
+    """
+    if doc_type not in VALID_DOC_TYPES:
+        return {
+            "success": False,
+            "error": f"Invalid doc_type '{doc_type}'. Must be one of: {sorted(VALID_DOC_TYPES)}",
+        }
+    if language not in VALID_LANGUAGES:
+        return {
+            "success": False,
+            "error": f"Invalid language '{language}'. Must be one of: {sorted(VALID_LANGUAGES)}",
+        }
+    if not original or not original.strip():
+        return {"success": False, "error": "original cannot be empty"}
+    if not corrected or not corrected.strip():
+        return {"success": False, "error": "corrected cannot be empty"}
+
+    from uuid import uuid4
+    correction_id = str(uuid4())
+    collection = get_collection_names()["passages"]
+
+    results = {}
+    for role, text, style_tag in [
+        ("original", original, "ai-corrected"),
+        ("corrected", corrected, "human-corrected"),
+    ]:
+        document_id = str(uuid4())
+        title = f"[CORRECTION:{role.upper()} | {doc_type.upper()} | {language.upper()}] {text[:60]}..."
+        metadata = {
+            "doc_type": doc_type,
+            "language": language,
+            "domain": domain,
+            "quality_notes": f"Correction {role}: {issue_type}",
+            "tags": ["correction", role, issue_type],
+            "source": source,
+            "entry_type": "correction",
+            "style": [style_tag],
+            "correction_id": correction_id,
+            "correction_role": role,
+            "issue_type": issue_type,
+        }
+        try:
+            point_ids = index_document(
+                collection_name=collection,
+                document_id=document_id,
+                title=title,
+                content=text,
+                metadata=metadata,
+                context_mode="metadata",
+            )
+            results[role] = {
+                "success": True,
+                "document_id": document_id,
+                "chunks_created": len(point_ids),
+            }
+        except Exception as e:
+            logger.error("Failed to record correction", role=role, error=str(e))
+            results[role] = {"success": False, "error": str(e)}
+
+    overall_success = all(v.get("success") for v in results.values())
+    return {
+        "success": overall_success,
+        "correction_id": correction_id,
+        "collection": collection,
+        "original": results.get("original", {}),
+        "corrected": results.get("corrected", {}),
     }
 
 

@@ -343,3 +343,74 @@ def test_invalid_doc_type_returns_error():
     result = score_ai_patterns("Some text.", doc_type="brochure")
     assert result["success"] is False
     assert "doc_type" in result["error"].lower() or "brochure" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# score_semantic_ai_likelihood tests
+# ---------------------------------------------------------------------------
+
+from unittest.mock import patch
+
+
+def _make_mock_result(score: float, style_tag: str) -> dict:
+    return {
+        "score": score,
+        "text": "Sample text",
+        "document_id": "abc",
+        "metadata": {"entry_type": "correction", "style": [style_tag]},
+    }
+
+
+def test_semantic_ai_likelihood_returns_human_like():
+    # Human results score higher → verdict should be human-like
+    mock_results = (
+        [_make_mock_result(0.40, "ai-corrected")] * 5
+        + [_make_mock_result(0.80, "human-corrected")] * 5
+    )
+    with patch("src.tools.ai_patterns.semantic_search", return_value=mock_results, create=True):
+        from src.tools.ai_patterns import score_semantic_ai_likelihood
+        result = score_semantic_ai_likelihood("The programme reached 3,400 people.")
+    assert result["success"] is True
+    assert result["method"] == "semantic"
+    assert result["verdict"] == "human-like"
+    assert result["likelihood"] < 0.45
+
+
+def test_semantic_ai_likelihood_returns_ai_like():
+    mock_results = (
+        [_make_mock_result(0.85, "ai-corrected")] * 5
+        + [_make_mock_result(0.30, "human-corrected")] * 5
+    )
+    with patch("src.tools.ai_patterns.semantic_search", return_value=mock_results, create=True):
+        from src.tools.ai_patterns import score_semantic_ai_likelihood
+        result = score_semantic_ai_likelihood("Furthermore, it is important to note that...")
+    assert result["success"] is True
+    assert result["verdict"] == "ai-like"
+    assert result["likelihood"] > 0.55
+
+
+def test_semantic_ai_likelihood_insufficient_data_no_ai_corpus():
+    # Only human-corrected passages in results
+    mock_results = [_make_mock_result(0.75, "human-corrected")] * 5
+    with patch("src.tools.ai_patterns.semantic_search", return_value=mock_results, create=True):
+        from src.tools.ai_patterns import score_semantic_ai_likelihood
+        result = score_semantic_ai_likelihood("Some text.")
+    assert result["success"] is True
+    assert result["method"] == "insufficient_data"
+    assert result["likelihood"] is None
+    assert "record_correction" in result["note"]
+
+
+def test_semantic_ai_likelihood_insufficient_data_empty_library():
+    with patch("src.tools.ai_patterns.semantic_search", return_value=[]):
+        from src.tools.ai_patterns import score_semantic_ai_likelihood
+        result = score_semantic_ai_likelihood("Some text.")
+    assert result["success"] is True
+    assert result["method"] == "insufficient_data"
+
+
+def test_semantic_ai_likelihood_kbase_unavailable():
+    with patch("src.tools.ai_patterns.semantic_search", None, create=True):
+        from src.tools.ai_patterns import score_semantic_ai_likelihood
+        result = score_semantic_ai_likelihood("Some text.")
+    assert result["success"] is False

@@ -20,11 +20,16 @@ Categories detected:
 """
 
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+try:
+    from kbase.vector.sync_search import semantic_search
+except ImportError:
+    semantic_search = None  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -544,4 +549,125 @@ def score_ai_patterns(
 
     except Exception as e:
         logger.error("score_ai_patterns failed", error=str(e))
+        return {"success": False, "error": str(e)}
+
+
+def score_semantic_ai_likelihood(
+    text: str,
+    top_k: int = 10,
+) -> dict:
+    """
+    Score how semantically similar text is to known AI-corrected passages vs.
+    human-corrected passages stored in the library via record_correction().
+
+    Embeds the input and retrieves the top_k nearest neighbours from each
+    labelled sub-corpus (style='ai-corrected' and style='human-corrected').
+    Returns the mean similarity to each sub-corpus and a likelihood score
+    (0.0 = human-like, 1.0 = AI-like).
+
+    Requires at least 1 stored passage in each sub-corpus; degrades gracefully
+    when the library is empty or unreachable.
+
+    Args:
+        text: The passage to score
+        top_k: Number of neighbours to retrieve per sub-corpus (default 10)
+
+    Returns:
+        {
+            success, likelihood (0–1), verdict (human-like|ambiguous|ai-like),
+            ai_mean_similarity, human_mean_similarity,
+            ai_sample_count, human_sample_count,
+            method ("semantic" | "insufficient_data"),
+            note (present when method=="insufficient_data")
+        }
+    """
+    if semantic_search is None:
+        return {
+            "success": False,
+            "error": "kbase not available — semantic scoring requires the kbase library",
+        }
+
+    try:
+        from src.tools.collections import get_collection_names
+    except ImportError:
+        return {"success": False, "error": "collections module not available"}
+
+    collection = get_collection_names()["passages"]
+
+    def _mean_similarity(results: list) -> Optional[float]:
+        scores = [r["score"] for r in results if "score" in r]
+        return sum(scores) / len(scores) if scores else None
+
+    try:
+        # Search within each labelled sub-corpus using style as a post-filter
+        # (kbase-core filter_conditions does not support list-field matching,
+        # so we over-fetch and post-filter, same pattern as search_passages)
+        fetch_k = top_k * 4  # over-fetch to survive post-filter attrition
+
+        raw_ai = semantic_search(
+            collection_name=collection,
+            query=text,
+            limit=fetch_k,
+            filter_conditions={"entry_type": "correction"},
+        )
+        raw_human = semantic_search(
+            collection_name=collection,
+            query=text,
+            limit=fetch_k,
+            filter_conditions={"entry_type": "correction"},
+        )
+
+        # Post-filter by style tag
+        ai_results = [
+            r for r in raw_ai
+            if "ai-corrected" in r.get("metadata", {}).get("style", [])
+        ][:top_k]
+        human_results = [
+            r for r in raw_human
+            if "human-corrected" in r.get("metadata", {}).get("style", [])
+        ][:top_k]
+
+        ai_mean = _mean_similarity(ai_results)
+        human_mean = _mean_similarity(human_results)
+
+        if ai_mean is None or human_mean is None:
+            return {
+                "success": True,
+                "likelihood": None,
+                "verdict": None,
+                "ai_mean_similarity": ai_mean,
+                "human_mean_similarity": human_mean,
+                "ai_sample_count": len(ai_results),
+                "human_sample_count": len(human_results),
+                "method": "insufficient_data",
+                "note": (
+                    "Not enough labelled samples to score. "
+                    "Call record_correction() to build the correction corpus."
+                ),
+            }
+
+        # Likelihood: proportion of similarity explained by the AI sub-corpus
+        total = ai_mean + human_mean
+        likelihood = round(ai_mean / total, 4) if total > 0 else 0.5
+
+        if likelihood >= 0.55:
+            verdict = "ai-like"
+        elif likelihood <= 0.45:
+            verdict = "human-like"
+        else:
+            verdict = "ambiguous"
+
+        return {
+            "success": True,
+            "likelihood": likelihood,
+            "verdict": verdict,
+            "ai_mean_similarity": round(ai_mean, 4),
+            "human_mean_similarity": round(human_mean, 4),
+            "ai_sample_count": len(ai_results),
+            "human_sample_count": len(human_results),
+            "method": "semantic",
+        }
+
+    except Exception as e:
+        logger.error("score_semantic_ai_likelihood failed", error=str(e))
         return {"success": False, "error": str(e)}
