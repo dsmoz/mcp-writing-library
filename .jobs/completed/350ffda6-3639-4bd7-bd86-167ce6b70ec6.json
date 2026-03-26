@@ -1,0 +1,11 @@
+{
+  "job_id": "350ffda6-3639-4bd7-bd86-167ce6b70ec6",
+  "document_id": "130e75a6-1042-4644-aa17-c115a87f3c2b",
+  "action": "index",
+  "status": "completed",
+  "created_at": "2026-03-25T21:42:27.135761+00:00",
+  "attempts": 1,
+  "error": null,
+  "started_at": "2026-03-25T21:42:55.590053+00:00",
+  "completed_at": "2026-03-25T21:43:05.337766+00:00"
+}
