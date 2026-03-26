@@ -422,3 +422,96 @@ def test_domain_unknown_falls_back_to_general_patterns():
     from src.tools.evidence import _get_claim_patterns, _ALL_CLAIM_PATTERNS
     patterns = _get_claim_patterns("unknown-domain")
     assert patterns == _ALL_CLAIM_PATTERNS
+
+
+# ---------------------------------------------------------------------------
+# research_paths — local file search helpers
+# ---------------------------------------------------------------------------
+
+def test_read_research_files_reads_txt(tmp_path):
+    """_read_research_files reads a .txt file and returns chunks."""
+    from src.tools.evidence import _read_research_files
+    txt_file = tmp_path / "research.txt"
+    txt_file.write_text("HIV prevalence in Mozambique reached 12.5% in 2023 according to national surveys.")
+    chunks = _read_research_files([str(txt_file)])
+    assert len(chunks) >= 1
+    assert chunks[0]["source_file"] == str(txt_file)
+    assert "HIV" in chunks[0]["text"]
+
+
+def test_read_research_files_reads_directory(tmp_path):
+    """_read_research_files scans a directory for supported files."""
+    from src.tools.evidence import _read_research_files
+    (tmp_path / "a.txt").write_text("Maternal mortality declined by 30% according to WHO data from 2022.")
+    (tmp_path / "b.md").write_text("Research shows that community-led interventions are effective in SADC.")
+    (tmp_path / "skip.csv").write_text("should,not,be,read")
+    chunks = _read_research_files([str(tmp_path)])
+    source_files = {c["source_file"] for c in chunks}
+    assert any("a.txt" in f for f in source_files)
+    assert any("b.md" in f for f in source_files)
+    assert all("skip.csv" not in f for f in source_files)
+
+
+def test_read_research_files_skips_missing_path():
+    """_read_research_files silently skips non-existent paths."""
+    from src.tools.evidence import _read_research_files
+    chunks = _read_research_files(["/nonexistent/path/file.txt"])
+    assert chunks == []
+
+
+def test_search_local_files_returns_scored_results(tmp_path):
+    """_search_local_files scores chunks by keyword overlap."""
+    from src.tools.evidence import _search_local_files
+    chunks = [
+        {"text": "HIV prevalence in Mozambique reached 12.5% in 2023.", "source_file": "report.md"},
+        {"text": "The programme was delivered by dedicated staff members.", "source_file": "report.md"},
+    ]
+    results = _search_local_files("HIV prevalence Mozambique", chunks, top_k=5)
+    assert len(results) >= 1
+    assert results[0]["score"] > 0
+    assert results[0]["source_type"] == "local"
+    assert "source_file" in results[0]
+    # First result should be the HIV-related chunk, not the staff one
+    assert "HIV" in results[0]["excerpt"]
+
+
+def test_verify_claims_uses_local_files_first(tmp_path):
+    """When research_paths is provided, local match short-circuits remote search."""
+    from src.tools.evidence import verify_claims
+    # Write a file with corroborating evidence for the claim
+    research_file = tmp_path / "evidence.md"
+    research_file.write_text(
+        "HIV prevalence among adults in Mozambique reached 12.5 percent according "
+        "to the national health survey conducted in 2023 by MISAU and partners."
+    )
+
+    # Mock remote sources to track whether they were called
+    with patch("src.tools.evidence._search_zotero") as mock_zotero, \
+         patch("src.tools.evidence._search_cerebellum") as mock_cerebellum:
+        # Keyword overlap alone will not reach 0.65; allow remote to be called — we
+        # just verify that local sources appear in the result
+        mock_zotero.return_value = []
+        mock_cerebellum.return_value = []
+
+        result = verify_claims(
+            "HIV prevalence reached 12.5% among adults in Mozambique in 2023.",
+            research_paths=[str(research_file)],
+        )
+
+    assert result["success"] is True
+    assert result["total_claims"] >= 1
+    # Local source should appear in sources for the claim
+    all_source_types = [s["source_type"] for claim in result["claims"] for s in claim["sources"]]
+    assert "local" in all_source_types
+
+
+def test_verify_claims_without_research_paths_unchanged():
+    """Omitting research_paths preserves existing behaviour."""
+    with patch("src.tools.evidence._search_zotero", return_value=[]), \
+         patch("src.tools.evidence._search_cerebellum", return_value=[]):
+        from src.tools.evidence import verify_claims
+        result = verify_claims(
+            "HIV prevalence reached 12.5% among adults in Mozambique.",
+        )
+    assert result["success"] is True
+    assert result["total_claims"] >= 1

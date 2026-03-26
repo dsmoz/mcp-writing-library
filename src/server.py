@@ -734,14 +734,18 @@ def verify_claims(
     domain: str = "general",
     top_k_per_claim: int = 3,
     corroboration_threshold: float = 0.65,
+    research_paths: list = None,
 ) -> dict:
     """
     Detect potential hallucinations by verifying claim-bearing sentences against
-    Zotero and Cerebellum knowledge bases.
+    local research files, Zotero, and Cerebellum knowledge bases.
+
+    Search order per claim: local research files (if provided) → Zotero → Cerebellum.
+    A strong local match short-circuits remote searches for that claim.
 
     Extracts sentences that contain statistics, causal assertions, epistemic
     verbs, citation placeholders, or country/prevalence keywords, then searches
-    both knowledge bases for corroborating sources.
+    sources for corroborating evidence.
 
     Claim patterns detected:
         - Numbers and percentages (e.g. "12.5%", "45 percent")
@@ -766,6 +770,9 @@ def verify_claims(
                 "m-and-e", "org", "health". Unknown values fall back to general patterns.
         top_k_per_claim: Sources to retrieve per claim sentence (default 3, max 10)
         corroboration_threshold: Minimum score to mark a claim as verified (default 0.65)
+        research_paths: Optional list of file paths or directory paths to local
+                        research documents (.md, .txt, .pdf). Read at call time;
+                        never indexed into Qdrant. Searched first before Zotero/Cerebellum.
 
     Returns:
         overall_evidence_score (0–1 or None), verdict (evidenced|mixed|unverified|no_claims_detected),
@@ -778,6 +785,7 @@ def verify_claims(
         domain=domain,
         top_k_per_claim=top_k_per_claim,
         corroboration_threshold=corroboration_threshold,
+        research_paths=research_paths,
     )
 
 

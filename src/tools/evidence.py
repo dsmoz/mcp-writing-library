@@ -7,7 +7,8 @@ knowledge bases, and evidence density scoring without external search.
 import os
 import re
 import sys
-from typing import List
+from pathlib import Path
+from typing import List, Optional
 
 import structlog
 
@@ -223,6 +224,98 @@ def _search_cerebellum(query: str, top_k: int) -> List[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Local research file helpers
+# ---------------------------------------------------------------------------
+
+_SUPPORTED_EXTENSIONS = {".md", ".txt", ".pdf"}
+_CHUNK_WORDS = 300
+
+
+def _read_research_files(paths: List[str]) -> List[dict]:
+    """Read local research files and return text chunks.
+
+    Accepts a mix of file paths and directory paths. Directories are scanned
+    one level deep for supported extensions (.md, .txt, .pdf).
+
+    Returns a list of dicts: [{text, source_file}].
+    """
+    chunks = []
+    for raw_path in paths:
+        p = Path(raw_path).expanduser()
+        if p.is_dir():
+            candidates = [f for f in p.iterdir() if f.suffix.lower() in _SUPPORTED_EXTENSIONS]
+        elif p.is_file() and p.suffix.lower() in _SUPPORTED_EXTENSIONS:
+            candidates = [p]
+        else:
+            logger.warning("research_paths: skipping unreadable path", path=str(p))
+            continue
+
+        for file_path in candidates:
+            try:
+                if file_path.suffix.lower() == ".pdf":
+                    content = _read_pdf(file_path)
+                else:
+                    content = file_path.read_text(encoding="utf-8", errors="ignore")
+            except Exception as exc:
+                logger.warning("research_paths: failed to read file", path=str(file_path), error=str(exc))
+                continue
+
+            words = content.split()
+            for i in range(0, max(1, len(words)), _CHUNK_WORDS):
+                chunk_text = " ".join(words[i: i + _CHUNK_WORDS])
+                if chunk_text.strip():
+                    chunks.append({"text": chunk_text, "source_file": str(file_path)})
+
+    return chunks
+
+
+def _read_pdf(file_path: Path) -> str:
+    """Extract text from a PDF file using pypdf if available, else empty string."""
+    try:
+        import pypdf  # type: ignore
+        reader = pypdf.PdfReader(str(file_path))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except ImportError:
+        logger.warning("pypdf not installed — skipping PDF", path=str(file_path))
+        return ""
+    except Exception as exc:
+        logger.warning("PDF read failed", path=str(file_path), error=str(exc))
+        return ""
+
+
+def _search_local_files(query: str, chunks: List[dict], top_k: int) -> List[dict]:
+    """Score chunks against the query using keyword overlap (offline, no embedding).
+
+    Returns normalised source dicts sorted by descending score, capped at top_k.
+    """
+    if not chunks:
+        return []
+
+    query_tokens = set(re.findall(r'\b\w{3,}\b', query.lower()))
+    if not query_tokens:
+        return []
+
+    scored = []
+    for chunk in chunks:
+        chunk_tokens = set(re.findall(r'\b\w{3,}\b', chunk["text"].lower()))
+        overlap = len(query_tokens & chunk_tokens)
+        if overlap == 0:
+            continue
+        score = round(overlap / len(query_tokens), 4)
+        scored.append({
+            "title": Path(chunk["source_file"]).name,
+            "citekey": None,
+            "score": score,
+            "source_type": "local",
+            "source_file": chunk["source_file"],
+            "excerpt": chunk["text"][:200],
+        })
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:top_k]
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -231,10 +324,15 @@ def verify_claims(
     domain: str = "general",
     top_k_per_claim: int = 3,
     corroboration_threshold: float = 0.65,
+    research_paths: Optional[List[str]] = None,
 ) -> dict:
     """
-    Extract claim-bearing sentences from text and verify each against Zotero
-    and Cerebellum knowledge bases.
+    Extract claim-bearing sentences from text and verify each against local
+    research files (optional), Zotero, and Cerebellum knowledge bases.
+
+    Search order per claim: local files → Zotero → Cerebellum.
+    A strong local match (score ≥ corroboration_threshold) short-circuits
+    the remote searches for that claim.
 
     Args:
         text: The text to analyse for unsupported claims.
@@ -244,6 +342,9 @@ def verify_claims(
         top_k_per_claim: Number of sources to retrieve per claim sentence.
         corroboration_threshold: Minimum score from any source to mark a
                                  claim as "verified" (default 0.65).
+        research_paths: Optional list of file paths or directory paths to local
+                        research documents (.md, .txt, .pdf). Read at call time;
+                        never indexed. Searched first, before Zotero/Cerebellum.
 
     Returns:
         dict with overall_evidence_score, verdict, per-claim results, and
@@ -278,14 +379,24 @@ def verify_claims(
             "note": "No claim-bearing sentences detected. No evidence verification was performed.",
         }
 
+    local_chunks = _read_research_files(research_paths) if research_paths else []
+
     claims_output = []
     verified_count = 0
 
     for sentence in claim_sentences:
-        zotero_sources = _search_zotero(sentence, top_k=top_k_per_claim)
-        cerebellum_sources = _search_cerebellum(sentence, top_k=top_k_per_claim)
+        all_sources = []
 
-        all_sources = zotero_sources + cerebellum_sources
+        local_sources = _search_local_files(sentence, local_chunks, top_k=top_k_per_claim)
+        all_sources.extend(local_sources)
+        local_best = max((s["score"] for s in local_sources), default=0.0)
+
+        if local_best < corroboration_threshold:
+            zotero_sources = _search_zotero(sentence, top_k=top_k_per_claim)
+            cerebellum_sources = _search_cerebellum(sentence, top_k=top_k_per_claim)
+            all_sources.extend(zotero_sources)
+            all_sources.extend(cerebellum_sources)
+
         best_score = max((s["score"] for s in all_sources), default=0.0)
 
         if best_score >= corroboration_threshold:
