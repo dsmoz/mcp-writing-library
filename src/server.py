@@ -521,6 +521,100 @@ def load_style_profile(name: str) -> dict:
 
 
 @mcp.tool()
+def update_style_profile(
+    name: str,
+    new_style_scores: Optional[dict] = None,
+    new_rules: Optional[List[str]] = None,
+    new_anti_patterns: Optional[List[str]] = None,
+    new_sample_excerpts: Optional[List[str]] = None,
+    new_source_documents: Optional[List[str]] = None,
+    description: Optional[str] = None,
+    score_weight: float = 0.3,
+) -> dict:
+    """
+    Merge new writing evidence into an existing style profile without overwriting it.
+
+    Call this after analysing new writing samples from the same author — it blends
+    the new scores with the existing profile rather than resetting it. Over time
+    this builds a richer, more accurate fingerprint of the author's voice.
+
+    Style scores are blended: updated = (1 - score_weight) * existing + score_weight * new.
+    Rules and anti_patterns are unioned (no duplicates). Sample excerpts are appended
+    and capped at 20.
+
+    Args:
+        name: Profile name to update (must already exist via save_style_profile)
+        new_style_scores: New dimension scores to blend in (0.0–1.0 per dimension)
+        new_rules: Additional writing rules to add (duplicates ignored)
+        new_anti_patterns: Additional anti-patterns to add (duplicates ignored)
+        new_sample_excerpts: New representative quotes to append
+        new_source_documents: Additional source document names to record
+        description: Replace the description if provided
+        score_weight: How much weight to give new scores (default 0.3 = 30% new, 70% existing).
+                      Use 0.5 when the new samples are equally representative.
+
+    Returns:
+        {success, name, document_id, updated_fields, chunks_created, score_weight_used, warnings}
+    """
+    from src.tools.style_profiles import update_style_profile as _update
+    return _update(
+        name=name,
+        new_style_scores=new_style_scores,
+        new_rules=new_rules,
+        new_anti_patterns=new_anti_patterns,
+        new_sample_excerpts=new_sample_excerpts,
+        new_source_documents=new_source_documents,
+        description=description,
+        score_weight=score_weight,
+    )
+
+
+@mcp.tool()
+def harvest_corrections_to_profile(
+    profile_name: str,
+    language: Optional[str] = None,
+    domain: Optional[str] = None,
+    min_corrections: int = 3,
+    top_k: int = 20,
+) -> dict:
+    """
+    Scan the correction corpus and surface candidate rules for a style profile.
+
+    Retrieves human-corrected passages (stored via record_correction()) and extracts
+    the issue types that were most frequently corrected. Returns a list of candidate
+    rules and anti-patterns for the agent to present to the user — the user approves
+    or skips each one, then approved entries are merged via update_style_profile().
+
+    Typical workflow:
+        1. User has accumulated corrections via record_correction()
+        2. Call harvest_corrections_to_profile(profile_name="danilo-voice-pt", language="pt")
+        3. Present candidates to user: "Want to add these to your profile?"
+        4. For approved ones: call update_style_profile(name, new_rules=[...], new_anti_patterns=[...])
+
+    Args:
+        profile_name: The style profile to enrich (must already exist)
+        language: Filter to corrections in this language (en|pt). Omit for all.
+        domain: Filter to corrections in this domain. Omit for all.
+        min_corrections: Minimum human-corrected passages required before returning
+                         candidates (default 3). Prevents noise from tiny corpora.
+        top_k: Max corrections to analyse (default 20)
+
+    Returns:
+        {success, profile_name, corrections_found,
+         candidates: [{type, text, source_issue_type, example_corrected}],
+         insufficient_data, note}
+    """
+    from src.tools.style_profiles import harvest_corrections_to_profile as _harvest
+    return _harvest(
+        profile_name=profile_name,
+        language=language,
+        domain=domain,
+        min_corrections=min_corrections,
+        top_k=top_k,
+    )
+
+
+@mcp.tool()
 def search_style_profiles(text: str, top_k: int = 3) -> dict:
     """
     Find saved style profiles most similar to a writing sample.

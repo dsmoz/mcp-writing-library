@@ -16,7 +16,7 @@ logger = structlog.get_logger(__name__)
 COLLECTION_NAME = "writing_style_profiles"
 
 try:
-    from kbase.vector.sync_indexing import index_document
+    from kbase.vector.sync_indexing import index_document, delete_document_vectors
     from kbase.vector.sync_search import semantic_search
     from qdrant_client import QdrantClient
     from qdrant_client.http.models import Filter, FieldCondition, MatchValue
@@ -24,6 +24,7 @@ try:
     _qdrant_available = True
 except ImportError:
     index_document = None  # type: ignore
+    delete_document_vectors = None  # type: ignore
     semantic_search = None  # type: ignore
     _qdrant_available = False
 
@@ -171,6 +172,318 @@ def load_style_profile(name: str) -> dict:
         return {"success": True, "profile": payload}
     except Exception as e:
         logger.error("Failed to load style profile", name=name, error=str(e))
+        return {"success": False, "error": str(e)}
+
+
+def update_style_profile(
+    name: str,
+    new_style_scores: Optional[dict] = None,
+    new_rules: Optional[list] = None,
+    new_anti_patterns: Optional[list] = None,
+    new_sample_excerpts: Optional[list] = None,
+    new_source_documents: Optional[list] = None,
+    description: Optional[str] = None,
+    score_weight: float = 0.3,
+) -> dict:
+    """
+    Merge new evidence into an existing style profile without overwriting it.
+
+    Scores are blended: new = (1 - score_weight) * existing + score_weight * new_scores.
+    Rules and anti_patterns are unioned; exact duplicates are removed.
+    Sample excerpts are appended (capped at 20 to keep the embed text manageable).
+
+    Args:
+        name: Profile name to update (must already exist)
+        new_style_scores: New dimension scores to blend in (0.0–1.0 per dimension)
+        new_rules: Additional rules to union into the existing list
+        new_anti_patterns: Additional anti-patterns to union into the existing list
+        new_sample_excerpts: New representative quotes to append
+        new_source_documents: Additional source document names to record
+        description: Replace the description if provided
+        score_weight: Weight given to new scores when blending (default 0.3 = 30% new, 70% existing)
+
+    Returns:
+        {success, name, document_id, updated_fields, chunks_created, warnings}
+    """
+    if not name or not name.strip():
+        return {"success": False, "error": "name cannot be empty"}
+    if not (0.0 < score_weight <= 1.0):
+        return {"success": False, "error": "score_weight must be between 0.0 (exclusive) and 1.0"}
+
+    # Load existing profile
+    load_result = load_style_profile(name)
+    if not load_result["success"]:
+        return load_result
+
+    existing = load_result["profile"]
+    warnings = []
+    updated_fields = []
+
+    # Blend style_scores
+    merged_scores = dict(existing.get("style_scores", {}))
+    if new_style_scores:
+        unknown = [k for k in new_style_scores if k not in VALID_STYLES]
+        if unknown:
+            warnings.append(f"Unknown style key(s) ignored: {unknown}")
+        for k, v in new_style_scores.items():
+            if k in VALID_STYLES:
+                clamped_v = max(0.0, min(1.0, float(v)))
+                existing_v = merged_scores.get(k, clamped_v)
+                merged_scores[k] = round(
+                    (1 - score_weight) * existing_v + score_weight * clamped_v, 4
+                )
+        updated_fields.append("style_scores")
+
+    # Union rules (preserve order, deduplicate)
+    merged_rules = list(existing.get("rules", []))
+    if new_rules:
+        for r in new_rules:
+            if r not in merged_rules:
+                merged_rules.append(r)
+        updated_fields.append("rules")
+
+    # Union anti_patterns
+    merged_anti = list(existing.get("anti_patterns", []))
+    if new_anti_patterns:
+        for a in new_anti_patterns:
+            if a not in merged_anti:
+                merged_anti.append(a)
+        updated_fields.append("anti_patterns")
+
+    # Append sample_excerpts (cap at 20)
+    merged_excerpts = list(existing.get("sample_excerpts", []))
+    if new_sample_excerpts:
+        for e in new_sample_excerpts:
+            if e not in merged_excerpts:
+                merged_excerpts.append(e)
+        merged_excerpts = merged_excerpts[-20:]
+        updated_fields.append("sample_excerpts")
+
+    # Append source_documents
+    merged_sources = list(existing.get("source_documents", []))
+    if new_source_documents:
+        for s in new_source_documents:
+            if s not in merged_sources:
+                merged_sources.append(s)
+        updated_fields.append("source_documents")
+
+    merged_description = description if description is not None else existing.get("description", "")
+    if description is not None:
+        updated_fields.append("description")
+
+    if not updated_fields:
+        return {"success": False, "error": "At least one field must be provided to update"}
+
+    # Delete old profile and re-index with merged data
+    try:
+        client = _get_qdrant_client()
+        from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+
+        old_results, _ = client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=Filter(
+                must=[FieldCondition(key="name", match=MatchValue(value=name.strip()))]
+            ),
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if old_results and delete_document_vectors is not None:
+            delete_document_vectors(
+                collection_name=COLLECTION_NAME,
+                document_id=old_results[0].payload.get("document_id", str(old_results[0].id)),
+            )
+    except Exception as e:
+        logger.warning("Could not delete old profile vectors", name=name, error=str(e))
+
+    # Re-save with merged data
+    result = save_style_profile(
+        name=name,
+        style_scores=merged_scores,
+        rules=merged_rules,
+        anti_patterns=merged_anti,
+        sample_excerpts=merged_excerpts,
+        description=merged_description,
+        source_documents=merged_sources,
+    )
+
+    if result.get("success"):
+        result["updated_fields"] = updated_fields
+        result["score_weight_used"] = score_weight
+        result["warnings"] = warnings + result.get("warnings", [])
+
+    return result
+
+
+def harvest_corrections_to_profile(
+    profile_name: str,
+    language: Optional[str] = None,
+    domain: Optional[str] = None,
+    min_corrections: int = 3,
+    top_k: int = 20,
+) -> dict:
+    """
+    Scan human-corrected passages in the library and propose additions to a style profile.
+
+    Retrieves passages tagged 'human-corrected' (stored via record_correction()),
+    extracts distinct issue_type categories found, and surfaces them as candidate
+    rules and anti-patterns for the agent to propose to the user.
+
+    The agent presents the candidates; the user approves or skips each one;
+    approved ones are merged via update_style_profile().
+
+    Args:
+        profile_name: Profile to enrich (must already exist)
+        language: Filter corrections by language (en|pt). If omitted, returns all.
+        domain: Filter corrections by domain. If omitted, returns all.
+        min_corrections: Minimum number of human-corrected passages required
+                         before returning candidates (default 3)
+        top_k: Max corrections to retrieve for analysis (default 20)
+
+    Returns:
+        {
+            success, profile_name, corrections_found,
+            candidates: [
+                {
+                    type: "rule" | "anti_pattern",
+                    text: str,
+                    source_issue_type: str,
+                    example_corrected: str   (first 120 chars of a supporting correction)
+                }
+            ],
+            insufficient_data: bool,
+            note: str (present when insufficient_data=True)
+        }
+    """
+    if not profile_name or not profile_name.strip():
+        return {"success": False, "error": "profile_name cannot be empty"}
+
+    # Verify profile exists
+    load_result = load_style_profile(profile_name)
+    if not load_result["success"]:
+        return load_result
+
+    if semantic_search is None:
+        return {"success": False, "error": "kbase not available — semantic search required"}
+
+    try:
+        from src.tools.collections import get_collection_names
+        collection = get_collection_names()["passages"]
+
+        filter_conditions: dict = {"entry_type": "correction"}
+        if language:
+            filter_conditions["language"] = language
+        if domain:
+            filter_conditions["domain"] = domain
+
+        raw = semantic_search(
+            collection_name=collection,
+            query="human correction improved writing quality",
+            limit=top_k * 4,  # over-fetch for post-filter
+            filter_conditions=filter_conditions,
+        )
+
+        # Post-filter to human-corrected only
+        human_corrections = [
+            r for r in raw
+            if "human-corrected" in r.get("metadata", {}).get("style", [])
+        ][:top_k]
+
+        if len(human_corrections) < min_corrections:
+            return {
+                "success": True,
+                "profile_name": profile_name,
+                "corrections_found": len(human_corrections),
+                "candidates": [],
+                "insufficient_data": True,
+                "note": (
+                    f"Only {len(human_corrections)} human-corrected passage(s) found "
+                    f"(minimum {min_corrections} required). "
+                    "Call record_correction() more to build the corpus."
+                ),
+            }
+
+        # Group by issue_type and build candidates
+        seen_issue_types: dict = {}
+        for r in human_corrections:
+            meta = r.get("metadata", {})
+            issue_type = meta.get("issue_type", "unspecified")
+            if issue_type not in seen_issue_types:
+                seen_issue_types[issue_type] = r.get("text", "")
+
+        existing_profile = load_result["profile"]
+        existing_rules = set(existing_profile.get("rules", []))
+        existing_anti = set(existing_profile.get("anti_patterns", []))
+
+        # Map issue_types to candidate rules / anti-patterns
+        _ISSUE_TO_RULE = {
+            "hollow-intensifier": {
+                "type": "anti_pattern",
+                "text": "Hollow intensifiers: avoid 'it is important to note that', 'it is crucial that'",
+            },
+            "passive-voice": {
+                "type": "rule",
+                "text": "Prefer active voice — restructure passive constructions",
+            },
+            "ai-patterns": {
+                "type": "anti_pattern",
+                "text": "AI-sounding openers and connectors: avoid Furthermore, Moreover, Additionally as paragraph starters",
+            },
+            "missing-connector": {
+                "type": "rule",
+                "text": "Every paragraph requires a connector to the preceding idea",
+            },
+            "deficit-framing": {
+                "type": "anti_pattern",
+                "text": "Deficit framing: avoid 'victims', 'suffering from', 'the poor'",
+            },
+            "grandiose-opener": {
+                "type": "anti_pattern",
+                "text": "Grandiose openers: avoid 'Against this backdrop', 'The evidence is unequivocal'",
+            },
+            "sentence-monotony": {
+                "type": "rule",
+                "text": "Vary sentence length deliberately — mix short, medium, and long sentences",
+            },
+            "generic-closing": {
+                "type": "anti_pattern",
+                "text": "Generic closings: avoid 'In conclusion, this report has shown...'",
+            },
+            "mechanical-listing": {
+                "type": "anti_pattern",
+                "text": "Mechanical listing: avoid Firstly / Secondly / Thirdly / Finally as paragraph openers",
+            },
+        }
+
+        candidates = []
+        for issue_type, example_text in seen_issue_types.items():
+            mapping = _ISSUE_TO_RULE.get(issue_type)
+            if mapping is None:
+                # Unknown issue type — surface as a generic rule candidate
+                mapping = {
+                    "type": "rule",
+                    "text": f"Address '{issue_type}' issues consistently",
+                }
+            # Skip if already in the profile
+            if mapping["text"] in existing_rules or mapping["text"] in existing_anti:
+                continue
+            candidates.append({
+                "type": mapping["type"],
+                "text": mapping["text"],
+                "source_issue_type": issue_type,
+                "example_corrected": example_text[:120],
+            })
+
+        return {
+            "success": True,
+            "profile_name": profile_name,
+            "corrections_found": len(human_corrections),
+            "candidates": candidates,
+            "insufficient_data": False,
+        }
+
+    except Exception as e:
+        logger.error("harvest_corrections_to_profile failed", error=str(e))
         return {"success": False, "error": str(e)}
 
 
