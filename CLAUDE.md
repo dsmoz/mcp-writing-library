@@ -8,12 +8,13 @@ MCP server for writing quality, evidence verification, and document intelligence
 |--------|-----------|-------------|
 | `src/tools/passages` | `add_passage`, `search_passages`, `update_passage`, `delete_passage`, `batch_add_passages` | Store and retrieve exemplary writing passages |
 | `src/tools/terms` | `add_term`, `search_terms`, `update_term`, `delete_term`, `batch_add_terms` | Store and retrieve terminology dictionary entries |
-| `src/tools/collections` | `get_collection_names`, `setup_collections`, `get_stats` | Manage Qdrant collections (5: passages, terms, style_profiles, rubrics, templates) |
+| `src/tools/collections` | `get_collection_names`, `setup_collections`, `get_stats` | Manage Qdrant collections (6: passages, terms, style_profiles, rubrics, templates, writing_thesaurus) |
 | `src/tools/export` | `export_library` | Export any collection to JSON or CSV |
 | `src/tools/styles` | `list_styles` | Writing style registry (14 labels across 4 categories) |
 | `src/tools/plagiarism` | `check_internal_similarity`, `check_external_similarity`, `score_external_similarity` | Similarity detection against library and web |
 | `src/tools/style_profiles` | `save_style_profile`, `load_style_profile`, `search_style_profiles` | Extract and retrieve writing style profiles from samples |
 | `src/tools/ai_patterns` | `score_ai_patterns` | Detect AI writing patterns; 10 rule-based detectors; calibrated by `doc_type` |
+| `src/tools/thesaurus` | `add_thesaurus_entry`, `search_thesaurus`, `suggest_alternatives`, `flag_vocabulary` | Vocabulary intelligence: flag AI-pattern words, suggest naturalistic alternatives (EN + PT) |
 | `src/tools/evidence` | `verify_claims`, `score_evidence_density` | Evidence hallucination detection via Zotero + Cerebellum; domain-aware claim patterns |
 | `src/tools/rubrics` | `add_rubric_criterion`, `score_against_rubric`, `list_rubric_donors` | Donor rubric alignment; USAID/UNDP/GF/EU/general criteria |
 | `src/tools/templates` | `add_template`, `check_structure`, `list_templates` | Document structure templates; detect present/missing sections |
@@ -135,6 +136,32 @@ result = check_structure(
 )
 # Returns per-section status: present|partial|missing
 ```
+
+## Pattern 9 — Vocabulary Flagging and Alternatives
+
+When reviewing a document for AI-sounding vocabulary, scan the full text and retrieve alternatives:
+
+```python
+# Flag all AI-pattern words in a paragraph
+result = flag_vocabulary(
+    text="We will leverage our robust stakeholder network to ensure holistic outcomes.",
+    language="en",
+    domain="general",
+)
+# Returns: verdict ("clean" | "review" | "ai-sounding"), flagged_count, flagged[]
+# Each flagged entry: headword, positions, alternatives preview
+
+# Get rich alternatives for a specific word
+result = suggest_alternatives(word="leverage", language="en", domain="governance")
+# Returns: definition, alternatives (word + meaning_nuance + register + when_to_use),
+#          collocations, why_avoid — enough for LLM to pick the right substitute
+
+# PT equivalent
+result = suggest_alternatives(word="alavancar", language="pt", domain="general")
+```
+
+`flag_vocabulary` complements `score_ai_patterns` (structural patterns) with lexical flagging.
+`suggest_alternatives` falls back to `search_terms` when word is not in the thesaurus.
 
 ## Common Pitfalls
 
