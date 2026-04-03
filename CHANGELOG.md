@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
+## [1.4.1] - 2026-04-03
+
+### Fixed
+
+- Added missing `psutil` dependency to `pyproject.toml`; its absence caused `kbase.core.monitoring` to fail on import, which silently set all Qdrant search functions (`semantic_search`, `get_qdrant_client`, etc.) to `None` and broke every `search_terms`, `search_thesaurus`, and `get_library_stats` call with "'NoneType' object is not callable"
+
 ## [1.4.0] - 2026-04-03
 
 ### Added
