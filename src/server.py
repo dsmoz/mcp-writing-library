@@ -55,69 +55,41 @@ def _require_admin(ctx: Context) -> Optional[str]:
     return None
 
 
-class RemoteTokenVerifier:
-    """Validates bearer tokens via the central OAuth server's /introspect endpoint."""
-    def __init__(self):
-        self._url = os.getenv("OAUTH_INTROSPECT_URL")
-        self._secret = os.getenv("OAUTH_INTROSPECT_SECRET")
+def _check_auth(token: str) -> bool:
+    """Accept any token in the API_TOKENS comma-separated list. If unset, allow all."""
+    api_tokens_env = os.getenv("API_TOKENS", "")
+    if not api_tokens_env:
+        return True
+    valid = [t.strip() for t in api_tokens_env.split(",") if t.strip()]
+    return token in valid
 
-    async def verify_token(self, token: str) -> Optional[object]:
-        import httpx
-        from mcp.server.auth.provider import AccessToken
-        # Accept static API tokens (used by gateway and service-to-service calls)
-        api_tokens = [t.strip() for t in os.getenv("API_TOKENS", "").split(",") if t.strip()]
-        if token in api_tokens:
-            return AccessToken(token=token, client_id="gateway", scopes=["mcp"], expires_at=None)
-        if not self._url or not self._secret:
-            print("WARNING: OAUTH_INTROSPECT_URL or OAUTH_INTROSPECT_SECRET not set", file=sys.stderr)
-            return None
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    self._url,
-                    json={"token": token},
-                    headers={"X-Introspect-Secret": self._secret},
-                    timeout=5.0,
-                )
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
-            if not data.get("active"):
-                return None
-            return AccessToken(
-                token=token,
-                client_id=data["client_id"],
-                scopes=data.get("scope", "mcp").split(),
-                expires_at=data.get("exp"),
-            )
-        except Exception as e:
-            print(f"WARNING: Token introspection failed: {e}", file=sys.stderr)
-            return None
+
+class BearerAuthMiddleware:
+    """Simple ASGI middleware — rejects requests without a valid API_TOKENS bearer token."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            auth = headers.get(b"authorization", b"").decode()
+            token = auth[7:] if auth.startswith("Bearer ") else ""
+            if not _check_auth(token):
+                import json as _json
+                body = _json.dumps({"error": "invalid_token", "error_description": "Authentication required"}).encode()
+                await send({"type": "http.response.start", "status": 401,
+                            "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
 
 
 def _build_mcp() -> FastMCP:
     transport = os.getenv("TRANSPORT", "stdio")
     if transport == "http":
-        from mcp.server.auth.settings import AuthSettings
-        issuer = os.getenv("RAILWAY_PUBLIC_DOMAIN", "http://localhost:8000")
-        if not issuer.startswith("http"):
-            issuer = f"https://{issuer}"
-        oauth_issuer = os.getenv("OAUTH_ISSUER_URL", issuer)
         host = os.getenv("HOST", "0.0.0.0")
         port = int(os.getenv("PORT", "8000"))
-        mcp_instance = FastMCP(
-            "writing-library",
-            host=host,
-            port=port,
-            token_verifier=RemoteTokenVerifier(),
-            auth=AuthSettings(
-                issuer_url=oauth_issuer,
-                resource_server_url=issuer,
-            ),
-        )
-        if not os.getenv("OAUTH_INTROSPECT_URL"):
-            print("WARNING: OAUTH_INTROSPECT_URL not set — all HTTP requests will be rejected", file=sys.stderr)
-        return mcp_instance
+        return FastMCP("writing-library", host=host, port=port)
     return FastMCP("writing-library")
 
 mcp = _build_mcp()

@@ -45,8 +45,12 @@ def main():
         print(f"📍 Project: {project_root}", file=sys.stderr)
         if transport == "http":
             port = int(os.getenv("PORT", "8000"))
-            print(f"🌐 HTTP transport on 0.0.0.0:{port}", file=sys.stderr)
-            mcp.run(transport="streamable-http")
+            host = os.getenv("HOST", "0.0.0.0")
+            print(f"🌐 HTTP transport on {host}:{port}", file=sys.stderr)
+            import uvicorn
+            from src.server import BearerAuthMiddleware
+            app = BearerAuthMiddleware(mcp.streamable_http_app())
+            uvicorn.run(app, host=host, port=port)
         else:
             mcp.run()
     except ImportError as e:
