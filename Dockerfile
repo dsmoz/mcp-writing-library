@@ -5,6 +5,10 @@ WORKDIR /app
 # git is required to install kbase-core from GitHub
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
+# Configure git to never prompt for credentials (public repos only)
+RUN git config --global credential.helper "" && \
+    git config --global url."https://".insteadOf git://
+
 # Install uv
 RUN pip install uv --no-cache-dir
 
@@ -12,7 +16,7 @@ RUN pip install uv --no-cache-dir
 COPY pyproject.toml uv.lock ./
 
 # Install all dependencies (kbase-core will be fetched from GitHub)
-RUN uv pip install --system -e . --no-cache-dir
+RUN GIT_TERMINAL_PROMPT=0 uv pip install --system -e . --no-cache-dir
 
 # Copy application source
 COPY src/ ./src/
