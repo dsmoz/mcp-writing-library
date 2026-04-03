@@ -6,20 +6,13 @@ knowledge bases, and evidence density scoring without external search.
 """
 import os
 import re
-import sys
 from pathlib import Path
 from typing import List, Optional
 
+import httpx
 import structlog
 
 logger = structlog.get_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# Cross-server path constants
-# ---------------------------------------------------------------------------
-
-_ZOTERO_PATH = "/Users/danilodasilva/Documents/Programming/mcp-servers/mcp-zotero-qdrant"
-_CEREBELLUM_PATH = "/Users/danilodasilva/Documents/Programming/mcp-servers/mcp-cerebellum"
 
 # ---------------------------------------------------------------------------
 # Claim-detection regex patterns
@@ -169,57 +162,84 @@ def _has_citation(sentence: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def _search_zotero(query: str, top_k: int) -> List[dict]:
-    """Search the Zotero knowledge base. Returns empty list on any failure."""
+    """Search the Zotero MCP server via HTTP. Returns empty list on any failure."""
+    base_url = os.getenv("ZOTERO_MCP_URL", "").rstrip("/")
+    if not base_url:
+        return []
+
+    collection_name = os.getenv("ZOTERO_QDRANT_COLLECTION", "zotero_hybrid")
+    code = (
+        f"from src.qdrant.search import SemanticSearch\n"
+        f"result = SemanticSearch(query={query!r}, top_k={top_k}, "
+        f"collection_name={collection_name!r})\nresult"
+    )
+    headers = {"Content-Type": "application/json"}
+    token = os.getenv("ZOTERO_MCP_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
     try:
-        if _ZOTERO_PATH not in sys.path:
-            sys.path.insert(0, _ZOTERO_PATH)
-        from src.qdrant.search import SemanticSearch  # type: ignore
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(f"{base_url}/run", json={"code": code}, headers=headers)
+            response.raise_for_status()
+            results = response.json()
     except Exception as exc:
-        logger.warning("Zotero import failed — skipping", error=str(exc))
+        logger.warning("Zotero HTTP search failed — returning empty", error=str(exc))
         return []
 
     try:
-        collection_name = os.getenv("ZOTERO_QDRANT_COLLECTION", "zotero_hybrid")
-        results = SemanticSearch(query=query, top_k=top_k, collection_name=collection_name)
-        normalised = []
-        for r in results:
-            normalised.append({
+        return [
+            {
                 "title": r.get("title", ""),
                 "citekey": r.get("citekey"),
                 "score": float(r.get("score", 0)),
                 "source_type": "zotero",
                 "excerpt": (r.get("text", "") or "")[:200],
-            })
-        return normalised
+            }
+            for r in results
+        ]
     except Exception as exc:
-        logger.warning("Zotero search failed — returning empty", error=str(exc))
+        logger.warning("Zotero result normalisation failed", error=str(exc))
         return []
 
 
 def _search_cerebellum(query: str, top_k: int) -> List[dict]:
-    """Search the Cerebellum knowledge base. Returns empty list on any failure."""
+    """Search the Cerebellum MCP server via HTTP. Returns empty list on any failure."""
+    base_url = os.getenv("CEREBELLUM_MCP_URL", "").rstrip("/")
+    if not base_url:
+        return []
+
+    code = (
+        f"from tools.search import global_search\n"
+        f"result = global_search(query={query!r}, limit={top_k})\nresult"
+    )
+    headers = {"Content-Type": "application/json"}
+    token = os.getenv("CEREBELLUM_MCP_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
     try:
-        if _CEREBELLUM_PATH not in sys.path:
-            sys.path.insert(0, _CEREBELLUM_PATH)
-        from tools.search import global_search  # type: ignore
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(f"{base_url}/run", json={"code": code}, headers=headers)
+            response.raise_for_status()
+            results = response.json()
     except Exception as exc:
-        logger.warning("Cerebellum import failed — skipping", error=str(exc))
+        logger.warning("Cerebellum HTTP search failed — returning empty", error=str(exc))
         return []
 
     try:
-        results = global_search(query=query, limit=top_k)
-        normalised = []
-        for r in results:
-            normalised.append({
+        return [
+            {
                 "title": r.get("title", ""),
                 "citekey": None,
                 "score": float(r.get("score", 0)),
                 "source_type": "cerebellum",
                 "excerpt": (r.get("text", "") or "")[:200],
-            })
-        return normalised
+            }
+            for r in results
+        ]
     except Exception as exc:
-        logger.warning("Cerebellum search failed — returning empty", error=str(exc))
+        logger.warning("Cerebellum result normalisation failed", error=str(exc))
         return []
 
 
