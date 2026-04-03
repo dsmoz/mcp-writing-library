@@ -6,12 +6,16 @@ import pytest
 def test_stdio_mode_builds_mcp_without_auth(monkeypatch):
     """When TRANSPORT=stdio, FastMCP is built without token_verifier."""
     monkeypatch.setenv("TRANSPORT", "stdio")
-    # Re-import to pick up env change
+    monkeypatch.delenv("API_TOKENS", raising=False)
     import importlib
     import src.server as mod
     importlib.reload(mod)
-    # mcp should not have token_verifier set (or it's None)
     assert mod.mcp is not None
+    # In stdio mode, no BearerTokenVerifier should be instantiated
+    # We verify this indirectly: the mcp object's settings should not have auth
+    # FastMCP exposes _auth_server_provider and _token_verifier internally
+    # Check that BearerTokenVerifier is not attached
+    assert not isinstance(getattr(mod.mcp, '_token_verifier', None), mod.BearerTokenVerifier)
 
 
 def test_bearer_token_verifier_accepts_valid_token(monkeypatch):

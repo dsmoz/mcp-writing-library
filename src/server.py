@@ -27,31 +27,31 @@ Tools:
     search_thesaurus         — semantic search across thesaurus entries
     flag_vocabulary          — scan text for AI-pattern vocabulary headwords
 """
+import os
+import sys
 from typing import Optional, List
 from mcp.server.fastmcp import FastMCP
-import os as _os
-from typing import Optional as _Optional
 
 
 class BearerTokenVerifier:
     """Simple bearer token verifier for HTTP transport. Validates against API_TOKENS env var."""
-    async def verify_token(self, token: str) -> _Optional[object]:
+    async def verify_token(self, token: str) -> Optional[object]:
         from mcp.server.auth.provider import AccessToken
-        valid = [t.strip() for t in _os.getenv("API_TOKENS", "").split(",") if t.strip()]
+        valid = [t.strip() for t in os.getenv("API_TOKENS", "").split(",") if t.strip()]
         if token in valid:
             return AccessToken(token=token, client_id="api-client", scopes=["mcp"])
         return None
 
 
 def _build_mcp() -> FastMCP:
-    transport = _os.getenv("TRANSPORT", "stdio")
+    transport = os.getenv("TRANSPORT", "stdio")
     if transport == "http":
         from mcp.server.auth.settings import AuthSettings
-        issuer = _os.getenv("RAILWAY_PUBLIC_DOMAIN", "http://localhost:8000")
+        issuer = os.getenv("RAILWAY_PUBLIC_DOMAIN", "http://localhost:8000")
         # issuer_url must be a valid URL with scheme
         if not issuer.startswith("http"):
             issuer = f"https://{issuer}"
-        return FastMCP(
+        mcp_instance = FastMCP(
             "writing-library",
             token_verifier=BearerTokenVerifier(),
             auth=AuthSettings(
@@ -59,6 +59,10 @@ def _build_mcp() -> FastMCP:
                 resource_server_url=issuer,
             ),
         )
+        valid_tokens = [t.strip() for t in os.getenv("API_TOKENS", "").split(",") if t.strip()]
+        if not valid_tokens:
+            print("WARNING: TRANSPORT=http but API_TOKENS is empty — all requests will be rejected", file=sys.stderr)
+        return mcp_instance
     return FastMCP("writing-library")
 
 mcp = _build_mcp()
