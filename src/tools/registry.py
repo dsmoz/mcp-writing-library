@@ -27,6 +27,24 @@ VALID_DOC_TYPES = {
     "facebook-post",
     "linkedin-post",
     "instagram-caption",
+    # Poetry
+    "haiku",
+    "sonnet",
+    "free-verse",
+    "villanelle",
+    "spoken-word",
+    # Songwriting
+    "pop-song",
+    "ballad",
+    "rap-verse",
+    "hymn",
+    "jingle",
+    # Prose fiction
+    "novel-chapter",
+    "short-story",
+    "flash-fiction",
+    "screenplay",
+    "creative-nonfiction",
 }
 
 VALID_DOMAINS = {
@@ -38,6 +56,10 @@ VALID_DOMAINS = {
     "health",
     "finance",
     "org",
+    # Creative writing
+    "poetry",
+    "songwriting",
+    "fiction",
 }
 
 # Passage and correction language values (binary: source language of text)
@@ -70,4 +92,10 @@ VALID_CHANNELS = {
     "presentation",
     # Catch-all
     "general",
+    # Creative publishing
+    "poetry-journal",
+    "literary-magazine",
+    "spoken-word-performance",
+    "song-release",
+    "fiction-manuscript",
 }

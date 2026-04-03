@@ -4,6 +4,7 @@ Multi-author voice consistency scorer.
 Measures how consistently text sections match a target style profile
 and detects authorship shifts within a single document.
 """
+import re
 import statistics
 from typing import List, Optional
 import structlog
@@ -201,9 +202,17 @@ def score_voice_consistency(
     }
 
 
+# Poetry/song doc_types that use stanza-based segmentation (single blank line)
+_STANZA_DOC_TYPES = frozenset({
+    "haiku", "sonnet", "free-verse", "villanelle", "spoken-word",
+    "pop-song", "ballad", "rap-verse", "hymn", "jingle",
+})
+
+
 def detect_authorship_shift(
     text: str,
     min_segment_length: int = 100,
+    doc_type: str = "general",
 ) -> dict:
     """
     Split a document into segments and flag those that deviate stylistically
@@ -225,8 +234,11 @@ def detect_authorship_shift(
     deviation, causing real shifts to go undetected. Prefer 5+ segments for reliable
     results.
     """
-    # Segment the text
-    raw_segments = text.split("\n\n")
+    # Segment the text — stanza-aware for poetry/songs
+    if doc_type in _STANZA_DOC_TYPES:
+        raw_segments = re.split(r"\n[ \t]*\n", text)
+    else:
+        raw_segments = text.split("\n\n")
     segments = [s.strip() for s in raw_segments if len(s.strip()) >= min_segment_length]
 
     if len(segments) < 3:

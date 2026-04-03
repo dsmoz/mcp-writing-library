@@ -66,6 +66,41 @@ STYLES: dict[str, dict] = {
         "category": "anti-pattern",
         "description": "Stacked sector buzzwords without explanation. Negative examples.",
     },
+    # Creative — Poetry
+    "lyrical": {
+        "category": "creative",
+        "description": "Elevated sonic texture. Attention to sound patterns, rhythm, and musicality of language.",
+    },
+    "imagistic": {
+        "category": "creative",
+        "description": "Concrete sensory images carry meaning rather than direct statement or abstraction.",
+    },
+    "elliptical": {
+        "category": "creative",
+        "description": "Compressed, gap-bearing writing that leaves room for the reader. Opposite of over-explained.",
+    },
+    # Creative — Songwriting
+    "hook-driven": {
+        "category": "creative",
+        "description": "Memorable, repeatable core phrase or melodic idea anchors the structure.",
+    },
+    "conversational-lyric": {
+        "category": "creative",
+        "description": "Lyrics feel spoken, singable, natural — not literary. Syllable count suits phrasing.",
+    },
+    # Creative — Fiction
+    "show-dont-tell": {
+        "category": "creative",
+        "description": "Character interiority and emotion rendered through action, dialogue, sensory detail — not authorial label.",
+    },
+    "close-third": {
+        "category": "creative",
+        "description": "Third-person narration with tight access to one character's interiority. Limited omniscience.",
+    },
+    "dialogue-authentic": {
+        "category": "creative",
+        "description": "Dialogue sounds distinct per character. Subtext present. Attribution lean and unobtrusive.",
+    },
 }
 
 VALID_STYLES: set[str] = set(STYLES.keys())

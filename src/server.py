@@ -17,6 +17,9 @@ Tools:
     check_external_similarity — detect similarity against web content (Tavily)
     score_external_similarity — score pre-fetched search results for similarity
     score_ai_patterns        — score text against known AI writing patterns
+    score_poetry_patterns    — score a poem against poetry-specific craft patterns
+    score_song_patterns      — score song lyrics against songwriting-specific patterns
+    score_fiction_patterns   — score prose fiction against fiction-specific craft patterns
     add_rubric_criterion     — store an evaluation criterion for any framework
     score_against_rubric     — score text against stored criteria for a framework
     list_rubric_frameworks   — list frameworks with stored rubric criteria
@@ -1265,6 +1268,111 @@ def score_ai_patterns(
     """
     from src.tools.ai_patterns import score_ai_patterns as _score
     return _score(text=text, language=language, threshold=threshold, doc_type=doc_type)
+
+
+@mcp.tool()
+def score_poetry_patterns(
+    text: str,
+    doc_type: str = "free-verse",
+    language: str = "auto",
+    threshold: float = 0.25,
+) -> dict:
+    """
+    Score a poem against poetry-specific craft patterns.
+
+    Use this instead of score_ai_patterns for poetry — it checks form-appropriate
+    patterns rather than document prose patterns.
+
+    Categories scored:
+        rhyme_scheme_regularity   — Sonnet ABAB/couplet and villanelle ABA refrains (N/A for other forms)
+        meter_regularity          — Syllable-count variance; strict for haiku (5-7-5) and sonnet (~10±2)
+        stanza_length_consistency — Flags stanzas with dramatically different line counts
+        line_ending_cliche        — Overused end-words: heart, soul, moon, tears, fire, etc.
+        prose_intrusion           — Lines >12 words with subordinating conjunction + finite verb
+        forced_rhyme_flag         — Inverted syntax suggesting rhyme-forced phrasing
+
+    Args:
+        text: The poem text
+        doc_type: haiku|sonnet|free-verse|villanelle|spoken-word (default: free-verse)
+        language: en|pt|auto (default: auto)
+        threshold: Per-category score above which a category is flagged (default: 0.25)
+
+    Returns:
+        overall_score, verdict (clean|review|craft-issue), per-category scores and findings,
+        line_count, stanza_count, word_count, doc_type
+    """
+    from src.tools.poetry_patterns import score_poetry_patterns as _score
+    return _score(text=text, doc_type=doc_type, language=language, threshold=threshold)
+
+
+@mcp.tool()
+def score_song_patterns(
+    text: str,
+    doc_type: str = "pop-song",
+    language: str = "auto",
+    threshold: float = 0.25,
+) -> dict:
+    """
+    Score song lyrics against songwriting-specific craft patterns.
+
+    Use this instead of score_ai_patterns for song lyrics.
+
+    Categories scored:
+        verse_chorus_structure  — Checks for at least one repeated stanza (chorus/refrain)
+        hook_repetition         — Most-repeated stanza recurs at expected intervals
+        syllable_singability    — Lines >12 syllables flagged as hard to sing in one breath
+        abstract_lyric_density  — Proportion of lines with zero concrete nouns
+        filler_word_density     — Lines that are purely filler (oh yeah, na na, la la)
+        rhyme_scheme_consistency — Stanza-to-stanza rhyme scheme (AABB/ABAB) consistency
+
+    Args:
+        text: The lyrics text
+        doc_type: pop-song|ballad|rap-verse|hymn|jingle (default: pop-song)
+        language: en|pt|auto (default: auto)
+        threshold: Per-category score above which a category is flagged (default: 0.25)
+
+    Returns:
+        overall_score, verdict (clean|review|craft-issue), per-category scores,
+        stanza_count, line_count, word_count, doc_type
+    """
+    from src.tools.song_patterns import score_song_patterns as _score
+    return _score(text=text, doc_type=doc_type, language=language, threshold=threshold)
+
+
+@mcp.tool()
+def score_fiction_patterns(
+    text: str,
+    doc_type: str = "short-story",
+    language: str = "auto",
+    threshold: float = 0.25,
+) -> dict:
+    """
+    Score prose fiction against fiction-specific craft patterns.
+
+    Use this instead of score_ai_patterns for prose fiction.
+
+    Categories scored:
+        show_vs_tell_ratio     — Telling sentences (felt/seemed/was + emotion adj) proportion
+        dialogue_tag_variety   — Non-"said" attribution tags (exclaimed, hissed…) > 30%
+        adverb_overload        — Adverbs modifying dialogue tags (said quietly, replied angrily)
+        filter_word_density    — "She felt / He saw / She noticed" filtering reader from experience
+        purple_prose_density   — ≥3 adjectives + ≥2 abstract nouns in non-dialogue paragraphs
+        narrative_distance     — Distant narration proxy (informational only, not penalised)
+
+    creative-nonfiction uses a higher threshold (0.4) for show_vs_tell_ratio.
+
+    Args:
+        text: The fiction text (chapter, story, or excerpt)
+        doc_type: novel-chapter|short-story|flash-fiction|screenplay|creative-nonfiction
+        language: en|pt|auto (default: auto)
+        threshold: Per-category score above which a category is flagged (default: 0.25)
+
+    Returns:
+        overall_score, verdict (clean|review|craft-issue), per-category scores,
+        paragraph_count, sentence_count, word_count, dialogue_line_count, doc_type
+    """
+    from src.tools.fiction_patterns import score_fiction_patterns as _score
+    return _score(text=text, doc_type=doc_type, language=language, threshold=threshold)
 
 
 @mcp.tool()

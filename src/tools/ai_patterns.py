@@ -162,6 +162,24 @@ _PARA_LIMITS = {
     "facebook-post": 2,
     "linkedin-post": 3,
     "instagram-caption": 1,
+    # Poetry — stanzas, not paragraphs
+    "haiku": 1,
+    "sonnet": 4,
+    "free-verse": 6,
+    "villanelle": 6,
+    "spoken-word": 8,
+    # Songwriting — verse/chorus blocks
+    "pop-song": 4,
+    "ballad": 6,
+    "rap-verse": 8,
+    "hymn": 4,
+    "jingle": 2,
+    # Prose fiction — longer blocks permissible
+    "novel-chapter": 8,
+    "short-story": 7,
+    "flash-fiction": 4,
+    "screenplay": 3,
+    "creative-nonfiction": 6,
 }
 
 # Required discursive expressions per 300-word page, keyed by doc_type
@@ -181,10 +199,36 @@ _DISCURSIVE_TARGETS = {
     "facebook-post": 0.0,
     "linkedin-post": 0.5,
     "instagram-caption": 0.0,
+    # Poetry — stanzas not paragraphs; discursive stance markers inapplicable
+    "haiku": 0.0,
+    "sonnet": 0.0,
+    "free-verse": 0.0,
+    "villanelle": 0.0,
+    "spoken-word": 0.0,
+    # Songwriting — inapplicable
+    "pop-song": 0.0,
+    "ballad": 0.0,
+    "rap-verse": 0.0,
+    "hymn": 0.0,
+    "jingle": 0.0,
+    # Prose fiction — very low; creative-nonfiction admits some
+    "novel-chapter": 0.0,
+    "short-story": 0.0,
+    "flash-fiction": 0.0,
+    "screenplay": 0.0,
+    "creative-nonfiction": 0.3,
 }
 
 # Social doc_types where discursive_deficit is structurally inapplicable
 _SOCIAL_DOC_TYPES = frozenset({"facebook-post", "linkedin-post", "instagram-caption"})
+
+# Creative doc_types — prose pattern detectors are inapplicable or misleading
+_CREATIVE_DOC_TYPES = frozenset({
+    "haiku", "sonnet", "free-verse", "villanelle", "spoken-word",
+    "pop-song", "ballad", "rap-verse", "hymn", "jingle",
+    "novel-chapter", "short-story", "flash-fiction", "screenplay",
+    "creative-nonfiction",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -211,9 +255,10 @@ def _split_sentences(text: str) -> List[str]:
     return [s.strip() for s in raw if len(s.strip()) >= 10]
 
 
-def _split_paragraphs(text: str) -> List[str]:
-    """Split on blank lines."""
-    paras = re.split(r"\n\s*\n", text.strip())
+def _split_paragraphs(text: str, stanza_mode: bool = False) -> List[str]:
+    """Split on blank lines. stanza_mode uses single blank line (poetry/songs)."""
+    sep = r"\n[ \t]*\n" if stanza_mode else r"\n\s*\n"
+    paras = re.split(sep, text.strip())
     return [p.strip() for p in paras if p.strip()]
 
 
@@ -368,9 +413,9 @@ def _detect_passive_voice(text: str) -> Tuple[float, List[dict]]:
     return round(score, 3), findings if passive_ratio > 0.25 else []
 
 
-def _detect_paragraph_length(text: str, max_sentences: int = _PARA_LIMITS["general"]) -> Tuple[float, List[dict]]:
+def _detect_paragraph_length(text: str, max_sentences: int = _PARA_LIMITS["general"], stanza_mode: bool = False) -> Tuple[float, List[dict]]:
     """Detect paragraphs exceeding max_sentences sentences."""
-    paragraphs = _split_paragraphs(text)
+    paragraphs = _split_paragraphs(text, stanza_mode=stanza_mode)
     findings = []
     violation_count = 0
 
@@ -504,21 +549,37 @@ def score_ai_patterns(
     para_limit = _PARA_LIMITS.get(doc_type, 5)
     discursive_target = _DISCURSIVE_TARGETS.get(doc_type, 1.0)
 
+    is_creative = doc_type in _CREATIVE_DOC_TYPES
+    stanza_mode = doc_type in {
+        "haiku", "sonnet", "free-verse", "villanelle", "spoken-word",
+        "pop-song", "ballad", "rap-verse", "hymn", "jingle",
+    }
+
     try:
         # Run all detectors
         connector_score, connector_findings = _detect_connector_repetition(text, detected_language)
         intensifier_score, intensifier_findings = _detect_hollow_intensifiers(text)
-        grandiose_score, grandiose_findings = _detect_grandiose_openers(text, detected_language)
+        if is_creative:
+            grandiose_score, grandiose_findings = 0.0, []
+        else:
+            grandiose_score, grandiose_findings = _detect_grandiose_openers(text, detected_language)
         em_dash_score, em_dash_findings = _detect_em_dash_intercalation(text)
         monotony_score, monotony_findings = _detect_sentence_monotony(text)
-        passive_score, passive_findings = _detect_passive_voice(text)
-        para_len_score, para_len_findings = _detect_paragraph_length(text, max_sentences=para_limit)
-        if doc_type in _SOCIAL_DOC_TYPES:
+        if is_creative:
+            passive_score, passive_findings = 0.0, []
+        else:
+            passive_score, passive_findings = _detect_passive_voice(text)
+        para_len_score, para_len_findings = _detect_paragraph_length(text, max_sentences=para_limit, stanza_mode=stanza_mode)
+        if doc_type in _SOCIAL_DOC_TYPES or is_creative:
             discursive_score, discursive_findings = 0.0, []
         else:
             discursive_score, discursive_findings = _detect_discursive_deficit(text, target=discursive_target)
-        listing_score, listing_findings = _detect_mechanical_listing(text)
-        closing_score, closing_findings = _detect_generic_closings(text)
+        if is_creative:
+            listing_score, listing_findings = 0.0, []
+            closing_score, closing_findings = 0.0, []
+        else:
+            listing_score, listing_findings = _detect_mechanical_listing(text)
+            closing_score, closing_findings = _detect_generic_closings(text)
 
         categories = {
             "connector_repetition": {"score": connector_score, "findings": connector_findings},

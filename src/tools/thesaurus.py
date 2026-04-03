@@ -30,8 +30,8 @@ except ImportError:
     FieldCondition = None  # type: ignore
     MatchValue = None  # type: ignore
 
-VALID_PARTS_OF_SPEECH = {"verb", "noun", "adjective", "adverb", "phrase"}
-VALID_REGISTERS = {"formal", "neutral", "informal", "institutional", "academic"}
+VALID_PARTS_OF_SPEECH = {"verb", "noun", "adjective", "adverb", "phrase", "literary-device"}
+VALID_REGISTERS = {"formal", "neutral", "informal", "institutional", "academic", "lyrical", "poetic", "colloquial"}
 
 
 def _build_content(entry: dict) -> str:
