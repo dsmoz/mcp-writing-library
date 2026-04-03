@@ -35,11 +35,18 @@ else:
 
 def main():
     """Main entry point for MCP server."""
+    transport = os.getenv("TRANSPORT", "stdio")
     try:
         from src.server import mcp
-        print("🚀 Starting MCP Writing Library Server...", file=sys.stderr)
+        print(f"🚀 Starting MCP Writing Library Server (transport={transport})...", file=sys.stderr)
         print(f"📍 Project: {project_root}", file=sys.stderr)
-        mcp.run()
+        if transport == "http":
+            host = "0.0.0.0"
+            port = int(os.getenv("PORT", "8000"))
+            print(f"🌐 HTTP transport on {host}:{port}", file=sys.stderr)
+            mcp.run(transport="streamable-http", host=host, port=port)
+        else:
+            mcp.run()
     except ImportError as e:
         print(f"❌ Failed to import MCP server: {e}", file=sys.stderr)
         sys.exit(1)
