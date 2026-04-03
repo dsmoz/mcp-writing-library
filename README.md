@@ -141,6 +141,7 @@ uv run python main.py
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.3.0 | 2026-04-03 | Railway HTTP deployment, bearer token auth, OpenAI embeddings (1536D), thesaurus ×91 |
 | 1.2.2 | 2026-03-26 | Social media doc_types: `facebook-post`, `linkedin-post`, `instagram-caption` |
 | 1.2.1 | 2026-03-26 | `research_paths` on `verify_claims` — local file evidence tier before Zotero/Cerebellum |
 | 1.2.0 | 2026-03-26 | 18 new tools: evidence, rubrics, templates, consistency, style profiles, CRUD, batch, export |

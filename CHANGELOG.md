@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
+## [1.3.0] - 2026-04-03
+
+### Added
+
+- HTTP streaming transport via FastMCP `streamable-http` — server can run as a remote MCP endpoint (Railway, cloud)
+- Bearer token authentication: `BearerTokenVerifier` class validates `Authorization: Bearer <token>` on every HTTP request; tokens configured via `API_TOKENS` env var (comma-separated)
+- `TRANSPORT` env var: `stdio` (default, local Claude Code) or `http` (Railway/remote)
+- `Dockerfile` and `.dockerignore` for Railway deployment; kbase-core vendored in `vendor/kbase/` to avoid Docker git clone issues
+- `tests/test_transport.py`: 4 tests covering BearerTokenVerifier and transport mode detection
+
+### Changed
+
+- Embedding model migrated from local LM Studio nomic-embed-text (768D) to OpenAI `text-embedding-3-small` (1536D)
+- `VECTOR_SIZE` in `collections.py` now reads `EMBEDDING_DIMENSIONS` env var (default 1536) instead of hardcoded 768
+- `pyproject.toml`: kbase-core removed from dependencies (vendored); added `uvicorn>=0.27.0`, `openai>=1.12.0`, `tiktoken>=0.5.2`, `pydantic-settings>=2.1.0`
+- Thesaurus expanded to 91 entries (~80 EN + ~28 PT) covering governance, advocacy, SRHR, M&E, and org management domains
+
 ## [1.2.2] - 2026-03-26
 
 ### Added
