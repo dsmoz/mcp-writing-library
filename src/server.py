@@ -1177,8 +1177,8 @@ def add_thesaurus_entry(
         language: Language: en|pt
         domain: Thematic domain: srhr|governance|climate|general|m-and-e|health|finance|org
         definition: Concise definition of the headword
-        part_of_speech: verb|noun|adjective|adverb|phrase
-        register: formal|neutral|informal|institutional|academic
+        part_of_speech: verb | noun | adjective | adverb | phrase
+        register: formal | neutral | informal | institutional | academic
         alternatives: List of dicts: [{word, meaning_nuance, register, when_to_use}]
         collocations: Common collocations to flag (e.g. ["robust framework"])
         why_avoid: Why this word sounds AI-generated or overused

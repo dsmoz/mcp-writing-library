@@ -274,3 +274,47 @@ def test_flag_vocabulary_clean_text(monkeypatch):
     assert result["success"] is True
     assert result["flagged_count"] == 0
     assert result["verdict"] == "clean"
+
+
+def test_flag_vocabulary_detects_multiword_headword(monkeypatch):
+    """flag_vocabulary must detect multi-word headwords like 'capacity building'."""
+    import src.tools.thesaurus as mod
+    import json
+
+    def mock_search(collection_name, query, limit, filter_conditions=None):
+        if query == "capacity building":
+            return [{
+                "score": 0.95,
+                "document_id": "id-capacity-building",
+                "title": "capacity building",
+                "metadata": {
+                    "headword": "capacity building",
+                    "language": "en",
+                    "domain": "general",
+                    "why_avoid": "Jargon overused in development sector.",
+                    "alternatives": json.dumps([{"word": "skills development", "meaning_nuance": "More specific", "register": "neutral", "when_to_use": "Default"}]),
+                    "collocations": "[]",
+                    "definition": "The process of developing skills and abilities.",
+                    "part_of_speech": "phrase",
+                    "register": "institutional",
+                    "example_bad": "",
+                    "example_good": "",
+                    "source": "manual",
+                    "entry_type": "thesaurus",
+                },
+            }]
+        return []
+
+    monkeypatch.setattr(mod, "semantic_search", mock_search)
+    text = "This approach requires capacity building and robust systems."
+    result = mod.flag_vocabulary(text=text, language="en", domain="general")
+    assert result["success"] is True
+    flagged_headwords = [f["headword"] for f in result["flagged"]]
+    assert "capacity building" in flagged_headwords
+
+
+def test_suggest_alternatives_invalid_language():
+    from src.tools.thesaurus import suggest_alternatives
+    result = suggest_alternatives(word="leverage", language="fr", domain="general")
+    assert result["success"] is False
+    assert "language" in result["error"]

@@ -3,6 +3,7 @@ Vocabulary intelligence layer: thesaurus-backed detection and suggestion of
 AI-pattern words with rich semantic context for both English and Portuguese.
 """
 import json
+import re
 from typing import Optional
 from uuid import uuid4
 
@@ -215,6 +216,10 @@ def suggest_alternatives(
     """
     if not word or not word.strip():
         return {"success": False, "error": "word cannot be empty"}
+    if language not in VALID_LANGUAGES:
+        return {"success": False, "error": f"Invalid language '{language}'. Must be one of: {sorted(VALID_LANGUAGES)}"}
+    if domain not in VALID_DOMAINS:
+        return {"success": False, "error": f"Invalid domain '{domain}'. Must be one of: {sorted(VALID_DOMAINS)}"}
 
     collection = get_collection_names()["thesaurus"]
 
@@ -284,12 +289,22 @@ def flag_vocabulary(
         return {"success": False, "error": "text cannot be empty"}
 
     collection = get_collection_names()["thesaurus"]
-    words = text.lower().split()
+
+    # Single tokens (cleaned)
+    tokens = [re.sub(r"[^\w\-]", "", w).lower() for w in text.split()]
+    tokens = [t for t in tokens if len(t) > 2]
+
+    # Single-word candidates + multi-word n-grams (2 and 3 words)
+    words_to_check: set[str] = set(tokens)
+    for n in (2, 3):
+        for i in range(len(tokens) - n + 1):
+            ngram = " ".join(tokens[i : i + n])
+            words_to_check.add(ngram)
+
     seen_headwords: set = set()
     flagged = []
 
-    for word in set(words):  # deduplicate before querying
-        clean_word = word.strip(".,;:!?\"'()")
+    for clean_word in words_to_check:
         if not clean_word or len(clean_word) < 3:
             continue
         try:
@@ -308,9 +323,14 @@ def flag_vocabulary(
                 seen_headwords.add(headword)
                 meta = hit.get("metadata", {})
                 alternatives_preview = json.loads(meta.get("alternatives", "[]"))[:3]
+                # For multi-word headwords, count phrase occurrences in text
+                if " " in clean_word or "-" in clean_word:
+                    occurrences = text.lower().count(clean_word)
+                else:
+                    occurrences = tokens.count(clean_word)
                 flagged.append({
                     "headword": meta.get("headword"),
-                    "occurrences": words.count(clean_word),
+                    "occurrences": occurrences,
                     "why_avoid": meta.get("why_avoid", ""),
                     "alternatives_preview": alternatives_preview,
                     "document_id": hit.get("document_id"),
@@ -325,5 +345,5 @@ def flag_vocabulary(
         "flagged": flagged,
         "language": language,
         "domain": domain,
-        "word_count": len(words),
+        "word_count": len(tokens),
     }
