@@ -68,6 +68,36 @@ def test_add_thesaurus_entry_rejects_invalid_language():
     assert "language" in result["error"]
 
 
+def test_add_thesaurus_entry_rejects_invalid_part_of_speech():
+    from src.tools.thesaurus import add_thesaurus_entry
+    result = add_thesaurus_entry(
+        headword="leverage",
+        language="en",
+        domain="general",
+        definition="To use something to maximum advantage.",
+        part_of_speech="gerund",
+        register="neutral",
+        alternatives=[],
+    )
+    assert result["success"] is False
+    assert "part_of_speech" in result["error"]
+
+
+def test_add_thesaurus_entry_rejects_invalid_register():
+    from src.tools.thesaurus import add_thesaurus_entry
+    result = add_thesaurus_entry(
+        headword="leverage",
+        language="en",
+        domain="general",
+        definition="To use something to maximum advantage.",
+        part_of_speech="verb",
+        register="slang",
+        alternatives=[],
+    )
+    assert result["success"] is False
+    assert "register" in result["error"]
+
+
 def test_add_thesaurus_entry_rejects_duplicate(monkeypatch):
     """If headword+language already exists, return error."""
     import src.tools.thesaurus as mod

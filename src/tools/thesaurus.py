@@ -74,6 +74,10 @@ def add_thesaurus_entry(
         return {"success": False, "error": f"Invalid language '{language}'. Must be one of: {sorted(VALID_LANGUAGES)}"}
     if domain not in VALID_DOMAINS:
         return {"success": False, "error": f"Invalid domain '{domain}'. Must be one of: {sorted(VALID_DOMAINS)}"}
+    if part_of_speech not in VALID_PARTS_OF_SPEECH:
+        return {"success": False, "error": f"Invalid part_of_speech '{part_of_speech}'. Must be one of: {sorted(VALID_PARTS_OF_SPEECH)}"}
+    if register not in VALID_REGISTERS:
+        return {"success": False, "error": f"Invalid register '{register}'. Must be one of: {sorted(VALID_REGISTERS)}"}
 
     alternatives = alternatives or []
     collocations = collocations or []
