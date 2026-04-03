@@ -135,13 +135,14 @@ def semantic_search(
             results = results.points
         else:
             # Simple dense-only search
-            results = client.search(
+            results = client.query_points(
                 collection_name=collection_name,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=limit,
                 score_threshold=score_threshold,
                 query_filter=query_filter,
-            )
+                with_payload=True,
+            ).points
 
         # Format results
         formatted_results = []
