@@ -6,7 +6,8 @@ WORKDIR /app
 RUN pip install uv --no-cache-dir
 
 # Copy dependency files first for layer caching
-COPY pyproject.toml uv.lock ./
+# README.md is required by hatchling during the editable install
+COPY pyproject.toml uv.lock README.md ./
 
 # Install all dependencies (kbase-core is vendored — no git fetch needed)
 RUN uv pip install --system -e . --no-cache-dir
