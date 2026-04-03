@@ -22,6 +22,10 @@ Tools:
     list_rubric_frameworks   — list frameworks with stored rubric criteria
     score_voice_consistency  — measure consistency of voice across sections
     detect_authorship_shift  — flag segments deviating stylistically from the majority
+    suggest_alternatives     — rich alternatives for a word with meaning, register, and usage context
+    add_thesaurus_entry      — add a new AI-pattern word to the thesaurus
+    search_thesaurus         — semantic search across thesaurus entries
+    flag_vocabulary          — scan text for AI-pattern vocabulary headwords
 """
 from typing import Optional, List
 from mcp.server.fastmcp import FastMCP
@@ -1114,3 +1118,132 @@ def score_ai_patterns(
     """
     from src.tools.ai_patterns import score_ai_patterns as _score
     return _score(text=text, language=language, threshold=threshold, doc_type=doc_type)
+
+
+@mcp.tool()
+def suggest_alternatives(
+    word: str,
+    language: str = "en",
+    domain: str = "general",
+    context_sentence: Optional[str] = None,
+    top_k: int = 5,
+) -> dict:
+    """
+    Look up a word in the vocabulary thesaurus and return rich alternatives.
+
+    Returns definition, register, meaning nuances, collocations, and why the word sounds AI-generated.
+    Falls back to search_terms if the word is not in the thesaurus.
+    Use this when drafting or reviewing text and you want to replace an overused or AI-sounding word.
+
+    Args:
+        word: The word to look up (e.g. "leverage", "robust", "ensure")
+        language: Language of the word: en|pt
+        domain: Thematic domain: srhr|governance|climate|general|m-and-e|health|finance|org
+        context_sentence: Optional sentence where the word appears (used for ranking)
+        top_k: Maximum alternatives to return (default 5)
+
+    Returns:
+        definition, why_avoid, alternatives (with word, meaning_nuance, register, when_to_use),
+        collocations, example_bad, example_good. found_in_thesaurus flag indicates source.
+    """
+    from src.tools.thesaurus import suggest_alternatives as _suggest
+    return _suggest(word=word, language=language, domain=domain,
+                    context_sentence=context_sentence, top_k=top_k)
+
+
+@mcp.tool()
+def add_thesaurus_entry(
+    headword: str,
+    language: str = "en",
+    domain: str = "general",
+    definition: str = "",
+    part_of_speech: str = "verb",
+    register: str = "neutral",
+    alternatives: Optional[List[dict]] = None,
+    collocations: Optional[List[str]] = None,
+    why_avoid: str = "",
+    example_bad: str = "",
+    example_good: str = "",
+    source: str = "manual",
+) -> dict:
+    """
+    Add a new AI-pattern word to the vocabulary thesaurus.
+
+    Use this when you encounter a word that is overused or sounds AI-generated
+    and you want to document it with its alternatives for future reference.
+
+    Args:
+        headword: The word to flag (e.g. "leverage")
+        language: Language: en|pt
+        domain: Thematic domain: srhr|governance|climate|general|m-and-e|health|finance|org
+        definition: Concise definition of the headword
+        part_of_speech: verb|noun|adjective|adverb|phrase
+        register: formal|neutral|informal|institutional|academic
+        alternatives: List of dicts: [{word, meaning_nuance, register, when_to_use}]
+        collocations: Common collocations to flag (e.g. ["robust framework"])
+        why_avoid: Why this word sounds AI-generated or overused
+        example_bad: Sentence using the headword poorly
+        example_good: Sentence using a preferred alternative
+        source: Origin: manual|dicionario-aberto|wordnik|harvested
+
+    Returns:
+        document_id on success; error if duplicate or invalid input
+    """
+    from src.tools.thesaurus import add_thesaurus_entry as _add
+    return _add(headword=headword, language=language, domain=domain,
+                definition=definition, part_of_speech=part_of_speech,
+                register=register, alternatives=alternatives or [],
+                collocations=collocations or [], why_avoid=why_avoid,
+                example_bad=example_bad, example_good=example_good, source=source)
+
+
+@mcp.tool()
+def search_thesaurus(
+    query: str,
+    language: Optional[str] = None,
+    domain: Optional[str] = None,
+    top_k: int = 8,
+) -> dict:
+    """
+    Semantic search across thesaurus entries.
+
+    Use to explore what AI-pattern words are stored, or to find entries
+    related to a concept (e.g. "governance vocabulary", "verbs for action").
+
+    Args:
+        query: What you are searching for
+        language: Filter by language: en|pt
+        domain: Filter by domain: srhr|governance|climate|general|m-and-e|health|finance|org
+        top_k: Number of results (default 8)
+
+    Returns:
+        List of matching entries with full metadata including alternatives
+    """
+    from src.tools.thesaurus import search_thesaurus as _search
+    return _search(query=query, language=language, domain=domain, top_k=top_k)
+
+
+@mcp.tool()
+def flag_vocabulary(
+    text: str,
+    language: str = "en",
+    domain: str = "general",
+) -> dict:
+    """
+    Scan text for AI-pattern vocabulary headwords present in the thesaurus.
+
+    Use alongside score_ai_patterns (which catches structural patterns) to
+    get lexical-level flagging. Returns flagged words with occurrence counts
+    and a preview of alternatives.
+
+    Args:
+        text: The text to scan
+        language: Language of the text: en|pt
+        domain: Thematic domain: srhr|governance|climate|general|m-and-e|health|finance|org
+
+    Returns:
+        flagged_count, verdict (clean|review|ai-sounding), list of flagged entries
+        with headword, occurrences, why_avoid, and alternatives_preview
+    """
+    from src.tools.thesaurus import flag_vocabulary as _flag
+    return _flag(text=text, language=language, domain=domain)
