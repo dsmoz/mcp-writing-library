@@ -51,8 +51,12 @@ def _build_mcp() -> FastMCP:
         # issuer_url must be a valid URL with scheme
         if not issuer.startswith("http"):
             issuer = f"https://{issuer}"
+        host = os.getenv("HOST", "0.0.0.0")
+        port = int(os.getenv("PORT", "8000"))
         mcp_instance = FastMCP(
             "writing-library",
+            host=host,
+            port=port,
             token_verifier=BearerTokenVerifier(),
             auth=AuthSettings(
                 issuer_url=issuer,

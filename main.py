@@ -44,12 +44,9 @@ def main():
         print(f"🚀 Starting MCP Writing Library Server (transport={transport})...", file=sys.stderr)
         print(f"📍 Project: {project_root}", file=sys.stderr)
         if transport == "http":
-            import uvicorn
-            host = "0.0.0.0"
             port = int(os.getenv("PORT", "8000"))
-            print(f"🌐 HTTP transport on {host}:{port}", file=sys.stderr)
-            app = mcp.streamable_http_app()
-            uvicorn.run(app, host=host, port=port, proxy_headers=True, forwarded_allow_ips="*")
+            print(f"🌐 HTTP transport on 0.0.0.0:{port}", file=sys.stderr)
+            mcp.run(transport="streamable-http")
         else:
             mcp.run()
     except ImportError as e:
