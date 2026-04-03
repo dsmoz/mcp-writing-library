@@ -33,14 +33,40 @@ from typing import Optional, List
 from mcp.server.fastmcp import FastMCP
 
 
-class BearerTokenVerifier:
-    """Simple bearer token verifier for HTTP transport. Validates against API_TOKENS env var."""
+class RemoteTokenVerifier:
+    """Validates bearer tokens via the central OAuth server's /introspect endpoint."""
+    def __init__(self):
+        self._url = os.getenv("OAUTH_INTROSPECT_URL")
+        self._secret = os.getenv("OAUTH_INTROSPECT_SECRET")
+
     async def verify_token(self, token: str) -> Optional[object]:
+        import httpx
         from mcp.server.auth.provider import AccessToken
-        valid = [t.strip() for t in os.getenv("API_TOKENS", "").split(",") if t.strip()]
-        if token in valid:
-            return AccessToken(token=token, client_id="api-client", scopes=["mcp"])
-        return None
+        if not self._url or not self._secret:
+            print("WARNING: OAUTH_INTROSPECT_URL or OAUTH_INTROSPECT_SECRET not set", file=sys.stderr)
+            return None
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    self._url,
+                    json={"token": token},
+                    headers={"X-Introspect-Secret": self._secret},
+                    timeout=5.0,
+                )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            if not data.get("active"):
+                return None
+            return AccessToken(
+                token=token,
+                client_id=data["client_id"],
+                scopes=data.get("scope", "mcp").split(),
+                expires_at=data.get("exp"),
+            )
+        except Exception as e:
+            print(f"WARNING: Token introspection failed: {e}", file=sys.stderr)
+            return None
 
 
 def _build_mcp() -> FastMCP:
@@ -48,24 +74,23 @@ def _build_mcp() -> FastMCP:
     if transport == "http":
         from mcp.server.auth.settings import AuthSettings
         issuer = os.getenv("RAILWAY_PUBLIC_DOMAIN", "http://localhost:8000")
-        # issuer_url must be a valid URL with scheme
         if not issuer.startswith("http"):
             issuer = f"https://{issuer}"
+        oauth_issuer = os.getenv("OAUTH_ISSUER_URL", issuer)
         host = os.getenv("HOST", "0.0.0.0")
         port = int(os.getenv("PORT", "8000"))
         mcp_instance = FastMCP(
             "writing-library",
             host=host,
             port=port,
-            token_verifier=BearerTokenVerifier(),
+            token_verifier=RemoteTokenVerifier(),
             auth=AuthSettings(
-                issuer_url=issuer,
+                issuer_url=oauth_issuer,
                 resource_server_url=issuer,
             ),
         )
-        valid_tokens = [t.strip() for t in os.getenv("API_TOKENS", "").split(",") if t.strip()]
-        if not valid_tokens:
-            print("WARNING: TRANSPORT=http but API_TOKENS is empty — all requests will be rejected", file=sys.stderr)
+        if not os.getenv("OAUTH_INTROSPECT_URL"):
+            print("WARNING: OAUTH_INTROSPECT_URL not set — all HTTP requests will be rejected", file=sys.stderr)
         return mcp_instance
     return FastMCP("writing-library")
 
