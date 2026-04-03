@@ -9,7 +9,7 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-VECTOR_SIZE = 768  # text-embedding-nomic-embed-text-v1.5 (local LM Studio)
+VECTOR_SIZE = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))  # text-embedding-3-small (OpenAI)
 
 
 def get_collection_names() -> dict:
