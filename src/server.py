@@ -565,6 +565,7 @@ def save_style_profile(
     ctx: Context,
     description: str = "",
     source_documents: list = [],
+    channel: Optional[str] = None,
 ) -> dict:
     """
     Save a writing style profile extracted from writing samples.
@@ -589,6 +590,10 @@ def save_style_profile(
         sample_excerpts: Short representative quotes from the writing samples
         description: Human-readable summary of the style
         source_documents: Names or titles of the writing samples analysed
+        channel: Publishing surface this profile targets
+                 (linkedin|facebook|instagram|twitter|whatsapp|tiktok|
+                  blog|newsletter|substack|email|report|proposal|
+                  executive-summary|tor|press-release|presentation|general)
 
     Returns:
         {success, name, document_id, chunks_created, warnings}
@@ -602,6 +607,7 @@ def save_style_profile(
         sample_excerpts=sample_excerpts,
         description=description,
         source_documents=source_documents,
+        channel=channel,
         user_id=_user_id(ctx),
     )
 
@@ -634,6 +640,7 @@ def update_style_profile(
     new_sample_excerpts: Optional[List[str]] = None,
     new_source_documents: Optional[List[str]] = None,
     description: Optional[str] = None,
+    channel: Optional[str] = None,
     score_weight: float = 0.3,
 ) -> dict:
     """
@@ -655,6 +662,8 @@ def update_style_profile(
         new_sample_excerpts: New representative quotes to append
         new_source_documents: Additional source document names to record
         description: Replace the description if provided
+        channel: Update the publishing channel tag
+                 (linkedin|facebook|instagram|email|report|proposal|general|...)
         score_weight: How much weight to give new scores (default 0.3 = 30% new, 70% existing).
                       Use 0.5 when the new samples are equally representative.
 
@@ -670,6 +679,7 @@ def update_style_profile(
         new_sample_excerpts=new_sample_excerpts,
         new_source_documents=new_source_documents,
         description=description,
+        channel=channel,
         score_weight=score_weight,
         user_id=_user_id(ctx),
     )
@@ -723,7 +733,12 @@ def harvest_corrections_to_profile(
 
 
 @mcp.tool()
-def search_style_profiles(text: str, ctx: Context, top_k: int = 3) -> dict:
+def search_style_profiles(
+    text: str,
+    ctx: Context,
+    top_k: int = 3,
+    channel: Optional[str] = None,
+) -> dict:
     """
     Find saved style profiles most similar to a writing sample.
 
@@ -733,12 +748,40 @@ def search_style_profiles(text: str, ctx: Context, top_k: int = 3) -> dict:
     Args:
         text: A writing sample to compare against saved profiles
         top_k: Number of results to return (default 3)
+        channel: Optional channel filter to narrow results
+                 (linkedin|facebook|email|report|proposal|general|...)
 
     Returns:
         {success, results: [{score, profile}], total}
     """
     from src.tools.style_profiles import search_style_profiles as _search
-    return _search(text=text, top_k=top_k, user_id=_user_id(ctx))
+    return _search(text=text, top_k=top_k, channel=channel, user_id=_user_id(ctx))
+
+
+@mcp.tool()
+def list_style_profiles(
+    ctx: Context,
+    channel: Optional[str] = None,
+    limit: int = 50,
+) -> dict:
+    """
+    List all saved writing style profiles, optionally filtered by channel.
+
+    Use this to browse available profiles before loading one, or to see
+    which channels have profiles defined.
+
+    Args:
+        channel: Filter to profiles tagged with a specific publishing surface
+                 (linkedin|facebook|instagram|twitter|whatsapp|tiktok|
+                  blog|newsletter|substack|email|report|proposal|
+                  executive-summary|tor|press-release|presentation|general)
+        limit: Max profiles to return (default 50)
+
+    Returns:
+        {success, profiles: [{name, description, channel, style_scores, created_at, document_id}], total}
+    """
+    from src.tools.style_profiles import list_style_profiles as _list
+    return _list(channel=channel, limit=limit, user_id=_user_id(ctx))
 
 
 @mcp.tool()

@@ -39,7 +39,7 @@ With `TRANSPORT=stdio`, there is no auth context. All tools operate on `default_
 | `src/tools/export` | `export_library` | Export any collection to JSON or CSV |
 | `src/tools/styles` | `list_styles` | Writing style registry (14 labels across 4 categories) |
 | `src/tools/plagiarism` | `check_internal_similarity`, `check_external_similarity`, `score_external_similarity` | Similarity detection against library and web |
-| `src/tools/style_profiles` | `save_style_profile`, `load_style_profile`, `search_style_profiles` | Extract and retrieve writing style profiles from samples |
+| `src/tools/style_profiles` | `save_style_profile`, `load_style_profile`, `update_style_profile`, `search_style_profiles`, `list_style_profiles`, `harvest_corrections_to_profile` | Extract and retrieve writing style profiles from samples; channel-tagged |
 | `src/tools/ai_patterns` | `score_ai_patterns` | Detect AI writing patterns; 10 rule-based detectors; calibrated by `doc_type` |
 | `src/tools/thesaurus` | `add_thesaurus_entry`, `search_thesaurus`, `suggest_alternatives`, `flag_vocabulary` | Vocabulary intelligence: flag AI-pattern words, suggest naturalistic alternatives (EN + PT) |
 | `src/tools/evidence` | `verify_claims`, `score_evidence_density` | Evidence hallucination detection via Zotero + Cerebellum; domain-aware claim patterns |
@@ -101,15 +101,30 @@ result = save_style_profile(
     anti_patterns=["'leverage'", "passive constructions", "Furthermore/Moreover"],
     sample_excerpts=["In Mozambique, the data tells only part of the story."],
     source_documents=["lambda-proposal-2026.docx", "linkedin-post-march-2026.txt"],
+    channel="linkedin",  # optional — publishing surface this profile targets
 )
 ```
 
-To retrieve a profile later:
+Channel vocabulary (`channel` parameter) — controlled set, unknown values warn but save:
+
+| Group | Values |
+|-------|--------|
+| Social media | `linkedin`, `facebook`, `instagram`, `twitter`, `whatsapp`, `tiktok` |
+| Long-form digital | `blog`, `newsletter`, `substack` |
+| Professional written | `email`, `report`, `proposal`, `executive-summary`, `tor`, `press-release`, `presentation` |
+| Catch-all | `general` |
+
+To retrieve profiles later:
 
 ```python
 profile = load_style_profile(name="danilo-voice-pt")
-# or search by similarity to a text sample:
-matches = search_style_profiles(text="The evidence is clear, but the politics are not.")
+
+# Search by similarity to a text sample (optionally filtered by channel)
+matches = search_style_profiles(text="The evidence is clear, but the politics are not.", channel="linkedin")
+
+# Browse all profiles, optionally by channel
+all_profiles = list_style_profiles()
+linkedin_profiles = list_style_profiles(channel="linkedin")
 ```
 
 ## Pattern 5 — AI Pattern Scoring with doc_type

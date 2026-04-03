@@ -45,3 +45,29 @@ VALID_LANGUAGES = {"en", "pt"}
 
 # Term language values (includes "both" for cross-language terms)
 VALID_LANGUAGES_TERMS = {"en", "pt", "both"}
+
+# Channel vocabulary for style profiles — the publishing surface a profile targets.
+# Unknown values warn but do not block saving (same pattern as style labels).
+VALID_CHANNELS = {
+    # Social media
+    "linkedin",
+    "facebook",
+    "instagram",
+    "twitter",
+    "whatsapp",
+    "tiktok",
+    # Long-form digital
+    "blog",
+    "newsletter",
+    "substack",
+    # Professional written
+    "email",
+    "report",
+    "proposal",
+    "executive-summary",
+    "tor",
+    "press-release",
+    "presentation",
+    # Catch-all
+    "general",
+}

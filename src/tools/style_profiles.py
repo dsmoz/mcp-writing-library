@@ -10,6 +10,7 @@ from uuid import uuid4
 import structlog
 
 from src.tools.styles import VALID_STYLES
+from src.tools.registry import VALID_CHANNELS
 
 logger = structlog.get_logger(__name__)
 
@@ -48,6 +49,7 @@ def save_style_profile(
     sample_excerpts: list,
     description: str = "",
     source_documents: Optional[list] = None,
+    channel: Optional[str] = None,
     user_id: str = "default",
 ) -> dict:
     """
@@ -78,8 +80,15 @@ def save_style_profile(
     if not rules and not sample_excerpts:
         return {"success": False, "error": "provide at least one rule or sample_excerpt"}
 
-    # Validate style score keys
+    # Validate channel
     warnings = []
+    if channel is not None and channel not in VALID_CHANNELS:
+        warnings.append(
+            f"Unknown channel '{channel}'. Valid channels: {sorted(VALID_CHANNELS)}. "
+            "Saving anyway — use list_style_profiles() to filter by channel."
+        )
+
+    # Validate style score keys
     unknown_styles = [k for k in style_scores if k not in VALID_STYLES]
     if unknown_styles:
         warnings.append(
@@ -103,6 +112,7 @@ def save_style_profile(
         "anti_patterns": anti_patterns,
         "sample_excerpts": sample_excerpts,
         "source_documents": source_documents or [],
+        "channel": channel,
         "created_at": created_at,
         "entry_type": "style_profile",
     }
@@ -187,6 +197,7 @@ def update_style_profile(
     new_sample_excerpts: Optional[list] = None,
     new_source_documents: Optional[list] = None,
     description: Optional[str] = None,
+    channel: Optional[str] = None,
     score_weight: float = 0.3,
     user_id: str = "default",
 ) -> dict:
@@ -276,6 +287,11 @@ def update_style_profile(
     if description is not None:
         updated_fields.append("description")
 
+    # Merge channel
+    merged_channel = channel if channel is not None else existing.get("channel")
+    if channel is not None:
+        updated_fields.append("channel")
+
     if not updated_fields:
         return {"success": False, "error": "At least one field must be provided to update"}
 
@@ -310,6 +326,7 @@ def update_style_profile(
         sample_excerpts=merged_excerpts,
         description=merged_description,
         source_documents=merged_sources,
+        channel=merged_channel,
         user_id=user_id,
     )
 
@@ -494,7 +511,12 @@ def harvest_corrections_to_profile(
         return {"success": False, "error": str(e)}
 
 
-def search_style_profiles(text: str, top_k: int = 3, user_id: str = "default") -> dict:
+def search_style_profiles(
+    text: str,
+    top_k: int = 3,
+    user_id: str = "default",
+    channel: Optional[str] = None,
+) -> dict:
     """
     Find the style profiles most semantically similar to a text sample.
 
@@ -503,6 +525,7 @@ def search_style_profiles(text: str, top_k: int = 3, user_id: str = "default") -
     Args:
         text: A writing sample to compare against saved profiles
         top_k: Number of results to return (default 3)
+        channel: Optional channel filter (linkedin|facebook|instagram|email|report|...)
 
     Returns:
         {success, results: [{score, profile}], total}
@@ -511,10 +534,12 @@ def search_style_profiles(text: str, top_k: int = 3, user_id: str = "default") -
         return {"success": False, "error": "text cannot be empty"}
 
     try:
+        filter_conditions = {"channel": channel} if channel else None
         raw_results = semantic_search(
             collection_name=_style_profiles_collection(user_id),
             query=text,
             limit=top_k,
+            filter_conditions=filter_conditions,
         )
 
         results = []
@@ -528,3 +553,58 @@ def search_style_profiles(text: str, top_k: int = 3, user_id: str = "default") -
     except Exception as e:
         logger.error("Style profile search failed", error=str(e))
         return {"success": False, "error": str(e), "results": []}
+
+
+def list_style_profiles(
+    channel: Optional[str] = None,
+    user_id: str = "default",
+    limit: int = 50,
+) -> dict:
+    """
+    List all saved style profiles, optionally filtered by channel.
+
+    Args:
+        channel: Filter to profiles tagged with a specific channel
+                 (linkedin|facebook|instagram|email|report|proposal|...)
+        limit: Max profiles to return (default 50)
+
+    Returns:
+        {success, profiles: [{name, description, channel, style_scores, created_at, document_id}], total}
+    """
+    try:
+        client = _get_qdrant_client()
+        from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+
+        scroll_filter = None
+        if channel:
+            scroll_filter = Filter(
+                must=[FieldCondition(key="channel", match=MatchValue(value=channel))]
+            )
+
+        results, _ = client.scroll(
+            collection_name=_style_profiles_collection(user_id),
+            scroll_filter=scroll_filter,
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        profiles = []
+        for point in results:
+            p = point.payload or {}
+            profiles.append({
+                "name": p.get("name"),
+                "description": p.get("description", ""),
+                "channel": p.get("channel"),
+                "style_scores": p.get("style_scores", {}),
+                "created_at": p.get("created_at"),
+                "document_id": p.get("document_id"),
+            })
+
+        # Sort by name for stable ordering
+        profiles.sort(key=lambda x: (x.get("name") or "").lower())
+
+        return {"success": True, "profiles": profiles, "total": len(profiles)}
+    except Exception as e:
+        logger.error("list_style_profiles failed", error=str(e))
+        return {"success": False, "error": str(e), "profiles": []}
