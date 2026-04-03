@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
+## [1.4.0] - 2026-04-03
+
+### Added
+
+- Multi-tenant collection isolation: each OAuth `client_id` gets its own Qdrant collection prefix (`{uid}_writing_passages`, `{uid}_writing_terms`, `{uid}_writing_style_profiles`); tools extract user identity from FastMCP `Context.client_id` and fall back to `"default"` in stdio mode
+- `writing_contributions` and `writing_terms_shared` as new core shared collections
+- Contribution and moderation system (`src/tools/contributions.py`): users submit entries to the shared pool via `contribute_term`, `contribute_thesaurus_entry`, `contribute_rubric`, `contribute_template`; admins approve/reject via `review_contribution`; non-admins can list only their own pending contributions
+- `list_style_profiles(channel, limit)` — browse all saved style profiles, optionally filtered by publishing channel
+- `channel` parameter on `save_style_profile`, `update_style_profile`, `search_style_profiles` — tag and filter profiles by publishing surface (linkedin|facebook|instagram|email|report|proposal|...)
+- `VALID_CHANNELS` controlled vocabulary in `registry.py` (18 values); unknown values warn but do not block save
+- `search_terms` now merges personal + shared (`writing_terms_shared`) results; personal terms win on deduplication; results re-sorted by score and capped at `top_k`
+
+### Changed
+
+- `collections.py` split into `get_user_collection_names(user_id)`, `get_core_collection_names()`, `get_collection_names(user_id)` (union view), and `setup_user_collections(user_id)`
+- All per-user tools (`add_passage`, `search_passages`, `add_term`, `search_terms`, `save_style_profile`, `check_internal_similarity`, `score_semantic_ai_likelihood`, `export_library`, etc.) now accept `user_id` internally and read it from OAuth context in `server.py`
+
 ## [1.3.0] - 2026-04-03
 
 ### Added

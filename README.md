@@ -16,12 +16,15 @@ flowchart TD
     MCP --> EVIDENCE["Evidence\nevidence.py\nverify_claims · score_evidence_density"]
     MCP --> RUBRICS["Rubrics\nrubrics.py\nscore_against_rubric · add_criterion · list_donors"]
     MCP --> TEMPLATES["Structure\ntemplates.py\ncheck_structure · add_template · list_templates"]
-    MCP --> STYLES["Style Profiles\nstyle_profiles.py\nsave · load · search"]
+    MCP --> STYLES["Style Profiles\nstyle_profiles.py\nsave · load · update · search · list · harvest"]
+    MCP --> CONTRIB["Contributions\ncontributions.py\ncontribute · list · review"]
     MCP --> CONSISTENCY["Consistency\nconsistency.py\nscore_voice_consistency · detect_authorship_shift"]
 
     PASSAGES -.->|vector upsert/search| Qdrant1(("Qdrant Cloud\nwriting_passages"))
     TERMS -.->|vector upsert/search| Qdrant2(("Qdrant Cloud\nwriting_terms"))
     STYLES -.->|vector upsert/search| Qdrant3(("Qdrant Cloud\nwriting_style_profiles"))
+    CONTRIB -.->|moderation queue| Qdrant6(("Qdrant Cloud\nwriting_contributions"))
+    TERMS -.->|shared pool search| Qdrant7(("Qdrant Cloud\nwriting_terms_shared"))
     RUBRICS -.->|vector upsert/search| Qdrant4(("Qdrant Cloud\nwriting_rubrics"))
     TEMPLATES -.->|vector upsert/search| Qdrant5(("Qdrant Cloud\nwriting_templates"))
     COLLECTIONS -.->|ensure all collections| Qdrant1
@@ -97,9 +100,23 @@ flowchart TD
 
 | Tool | Function | Description |
 |------|----------|-------------|
-| `save_style_profile` | `save_style_profile(name, description, style_scores, rules, anti_patterns, sample_excerpts, source_documents)` | Save a writing style profile |
+| `save_style_profile` | `save_style_profile(name, description, style_scores, rules, anti_patterns, sample_excerpts, source_documents, channel)` | Save a writing style profile tagged with a publishing channel |
 | `load_style_profile` | `load_style_profile(name)` | Load a saved style profile by name |
-| `search_style_profiles` | `search_style_profiles(text, top_k)` | Find best matching style profile for a text sample |
+| `update_style_profile` | `update_style_profile(name, new_style_scores, new_rules, new_anti_patterns, channel, score_weight)` | Blend new evidence into an existing style profile |
+| `search_style_profiles` | `search_style_profiles(text, top_k, channel)` | Find best matching style profile, optionally filtered by channel |
+| `list_style_profiles` | `list_style_profiles(channel, limit)` | Browse all saved style profiles, optionally filtered by channel |
+| `harvest_corrections_to_profile` | `harvest_corrections_to_profile(profile_name, language, domain, min_corrections)` | Surface candidate rules from the human-correction corpus |
+
+### Contributions & Moderation
+
+| Tool | Function | Description |
+|------|----------|-------------|
+| `contribute_term` | `contribute_term(preferred, contributed_by, avoid, domain, language, why, note)` | Submit a term to the shared moderation queue |
+| `contribute_thesaurus_entry` | `contribute_thesaurus_entry(headword, contributed_by, language, domain, ...)` | Submit a thesaurus entry for review |
+| `contribute_rubric` | `contribute_rubric(framework, section, criterion, contributed_by, weight, red_flags)` | Submit a rubric criterion for review |
+| `contribute_template` | `contribute_template(framework, doc_type, sections, contributed_by)` | Submit a document template for review |
+| `list_contributions` | `list_contributions(status, target, contributed_by, limit)` | List contributions (own only for non-admins) |
+| `review_contribution` | `review_contribution(contribution_id, action, reviewed_by, rejection_reason)` | Publish or reject a pending contribution (admin only) |
 
 ### Utility
 
@@ -141,6 +158,7 @@ uv run python main.py
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.4.0 | 2026-04-03 | Multi-tenant isolation, contribution moderation, channel-tagged style profiles |
 | 1.3.0 | 2026-04-03 | Railway HTTP deployment, bearer token auth, OpenAI embeddings (1536D), thesaurus ×91 |
 | 1.2.2 | 2026-03-26 | Social media doc_types: `facebook-post`, `linkedin-post`, `instagram-caption` |
 | 1.2.1 | 2026-03-26 | `research_paths` on `verify_claims` — local file evidence tier before Zotero/Cerebellum |
