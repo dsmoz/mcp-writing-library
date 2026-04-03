@@ -35,6 +35,7 @@ With `TRANSPORT=stdio`, there is no auth context. All tools operate on `default_
 | `src/tools/passages` | `add_passage`, `search_passages`, `update_passage`, `delete_passage`, `batch_add_passages` | Store and retrieve exemplary writing passages (per-user) |
 | `src/tools/terms` | `add_term`, `search_terms`, `update_term`, `delete_term`, `batch_add_terms` | Store and retrieve terminology dictionary entries (per-user) |
 | `src/tools/collections` | `get_collection_names`, `get_user_collection_names`, `get_core_collection_names`, `setup_collections`, `setup_user_collections`, `get_stats` | Manage Qdrant collections; user_id-aware |
+| `src/tools/contributions` | `contribute`, `contribute_term`, `contribute_thesaurus_entry`, `contribute_rubric`, `contribute_template`, `list_contributions`, `review_contribution` | Moderation queue for user contributions to shared collections |
 | `src/tools/export` | `export_library` | Export any collection to JSON or CSV |
 | `src/tools/styles` | `list_styles` | Writing style registry (14 labels across 4 categories) |
 | `src/tools/plagiarism` | `check_internal_similarity`, `check_external_similarity`, `score_external_similarity` | Similarity detection against library and web |

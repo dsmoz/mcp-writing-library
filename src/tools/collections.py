@@ -38,11 +38,17 @@ def _safe_user_id(user_id: str) -> str:
 
 
 def get_core_collection_names() -> dict:
-    """Return names for shared/core collections (not user-scoped)."""
+    """Return names for shared/core collections (not user-scoped).
+
+    writing_terms_shared — published terms contributed by users (read by all search_terms calls)
+    writing_contributions — moderation queue (pending/published/rejected contributions)
+    """
     return {
         "rubrics": os.getenv("COLLECTION_RUBRICS", "writing_rubrics"),
         "templates": os.getenv("COLLECTION_TEMPLATES", "writing_templates"),
         "thesaurus": os.getenv("COLLECTION_THESAURUS", "writing_thesaurus"),
+        "terms_shared": os.getenv("COLLECTION_TERMS_SHARED", "writing_terms_shared"),
+        "contributions": os.getenv("COLLECTION_CONTRIBUTIONS", "writing_contributions"),
     }
 
 

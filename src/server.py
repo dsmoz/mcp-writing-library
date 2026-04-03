@@ -41,6 +41,17 @@ def _user_id(ctx: Context) -> str:
     return client_id if client_id else "default"
 
 
+def _require_admin(ctx: Context) -> Optional[str]:
+    """Return None if caller is admin, else an error string."""
+    admin_id = os.getenv("ADMIN_CLIENT_ID", "")
+    if not admin_id:
+        return "ADMIN_CLIENT_ID is not configured — admin tools are disabled"
+    caller = _user_id(ctx)
+    if caller != admin_id:
+        return f"Admin access required. Caller '{caller}' is not the configured admin."
+    return None
+
+
 class RemoteTokenVerifier:
     """Validates bearer tokens via the central OAuth server's /introspect endpoint."""
     def __init__(self):
@@ -1340,3 +1351,284 @@ def flag_vocabulary(
     """
     from src.tools.thesaurus import flag_vocabulary as _flag
     return _flag(text=text, language=language, domain=domain)
+
+
+# ---------------------------------------------------------------------------
+# Contribution tools (user-facing)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def contribute_term(
+    preferred: str,
+    ctx: Context,
+    avoid: str = "",
+    domain: str = "general",
+    language: str = "en",
+    why: str = "",
+    example_bad: str = "",
+    example_good: str = "",
+    note: str = "",
+) -> dict:
+    """
+    Submit a terminology entry for review and potential inclusion in the shared dictionary.
+
+    Unlike add_term() (which saves to your personal dictionary immediately), this sends
+    the entry to a moderation queue. Once an admin approves it, it becomes visible to all users
+    via search_terms(). Your personal add_term() entries are always visible only to you.
+
+    Args:
+        preferred: The term to use (e.g. "rights-holder", "key populations")
+        avoid: Term to avoid (e.g. "victim", "vulnerable groups")
+        domain: Thematic area: srhr|governance|climate|general|m-and-e|health|finance|org
+        language: Language: en|pt|both
+        why: Reason for preference
+        example_bad: Example of poor usage
+        example_good: Example of correct usage
+        note: Optional note to the moderator
+
+    Returns:
+        {success, contribution_id, status: "pending"}
+    """
+    from src.tools.contributions import contribute_term as _contribute
+    result = _contribute(
+        preferred=preferred, avoid=avoid, domain=domain, language=language,
+        why=why, example_bad=example_bad, example_good=example_good,
+        contributed_by=_user_id(ctx), note=note,
+    )
+    if result.get("success"):
+        _notify_contribution(result["contribution_id"], "terms", preferred, _user_id(ctx))
+    return result
+
+
+@mcp.tool()
+def contribute_thesaurus_entry(
+    headword: str,
+    ctx: Context,
+    language: str = "en",
+    domain: str = "general",
+    definition: str = "",
+    part_of_speech: str = "verb",
+    register: str = "neutral",
+    alternatives: Optional[List[dict]] = None,
+    collocations: Optional[List[str]] = None,
+    why_avoid: str = "",
+    example_bad: str = "",
+    example_good: str = "",
+    note: str = "",
+) -> dict:
+    """
+    Submit a new AI-pattern word to the shared vocabulary thesaurus for review.
+
+    Once approved by an admin, the entry is added to the shared thesaurus and
+    becomes available to all users via suggest_alternatives() and flag_vocabulary().
+
+    Args:
+        headword: The word to flag (e.g. "leverage", "robust")
+        language: Language: en|pt
+        domain: Thematic domain: srhr|governance|climate|general|m-and-e|health|finance|org
+        definition: Concise definition
+        part_of_speech: verb|noun|adjective|adverb|phrase
+        register: formal|neutral|informal|institutional|academic
+        alternatives: List of {word, meaning_nuance, register, when_to_use}
+        collocations: Common collocations to flag
+        why_avoid: Why this word sounds AI-generated or overused
+        example_bad: Poor usage example
+        example_good: Good alternative usage
+        note: Optional note to the moderator
+
+    Returns:
+        {success, contribution_id, status: "pending"}
+    """
+    from src.tools.contributions import contribute_thesaurus_entry as _contribute
+    result = _contribute(
+        headword=headword, language=language, domain=domain,
+        definition=definition, part_of_speech=part_of_speech,
+        register=register, alternatives=alternatives or [],
+        collocations=collocations or [], why_avoid=why_avoid,
+        example_bad=example_bad, example_good=example_good,
+        contributed_by=_user_id(ctx), note=note,
+    )
+    if result.get("success"):
+        _notify_contribution(result["contribution_id"], "thesaurus", headword, _user_id(ctx))
+    return result
+
+
+@mcp.tool()
+def contribute_rubric(
+    framework: str,
+    section: str,
+    criterion: str,
+    ctx: Context,
+    weight: float = 1.0,
+    red_flags: Optional[List[str]] = None,
+    note: str = "",
+) -> dict:
+    """
+    Submit an evaluation criterion to the shared rubric library for review.
+
+    Once approved, the criterion is available to all users via score_against_rubric().
+
+    Args:
+        framework: Evaluation framework slug (e.g. "usaid", "undp", "lambda")
+        section: Document section (e.g. "technical-approach", "sustainability")
+        criterion: The criterion description
+        weight: Relative importance 0.1–2.0 (default 1.0)
+        red_flags: Phrases that evaluators penalise
+        note: Optional note to the moderator
+
+    Returns:
+        {success, contribution_id, status: "pending"}
+    """
+    from src.tools.contributions import contribute_rubric as _contribute
+    result = _contribute(
+        framework=framework, section=section, criterion=criterion,
+        weight=weight, red_flags=red_flags or [],
+        contributed_by=_user_id(ctx), note=note,
+    )
+    if result.get("success"):
+        _notify_contribution(result["contribution_id"], "rubrics", f"{framework}/{section}", _user_id(ctx))
+    return result
+
+
+@mcp.tool()
+def contribute_template(
+    framework: str,
+    doc_type: str,
+    sections: List[dict],
+    ctx: Context,
+    note: str = "",
+) -> dict:
+    """
+    Submit a document structure template to the shared library for review.
+
+    Once approved, the template is available to all users via check_structure().
+
+    Args:
+        framework: Framework slug (e.g. "undp", "lambda", "ds-moz")
+        doc_type: Document type — see registry for valid values
+        sections: List of {name, description, required (bool), order (int)}
+        note: Optional note to the moderator
+
+    Returns:
+        {success, contribution_id, status: "pending"}
+    """
+    from src.tools.contributions import contribute_template as _contribute
+    result = _contribute(
+        framework=framework, doc_type=doc_type, sections=sections,
+        contributed_by=_user_id(ctx), note=note,
+    )
+    if result.get("success"):
+        _notify_contribution(result["contribution_id"], "templates", f"{framework}/{doc_type}", _user_id(ctx))
+    return result
+
+
+@mcp.tool()
+def list_contributions(
+    ctx: Context,
+    status: str = "pending",
+    target: Optional[str] = None,
+    mine: bool = False,
+    limit: int = 50,
+) -> dict:
+    """
+    List contributions from the moderation queue.
+
+    Admins see all contributions. Regular users can only view their own (mine=True is enforced).
+
+    Args:
+        status: Filter by status — pending|published|rejected|all (default: pending)
+        target: Filter by target — terms|thesaurus|rubrics|templates
+        mine: If True, return only your own contributions (always True for non-admins)
+        limit: Max results (default 50)
+
+    Returns:
+        {success, contributions: [...], total}
+    """
+    from src.tools.contributions import list_contributions as _list
+
+    caller = _user_id(ctx)
+    admin_id = os.getenv("ADMIN_CLIENT_ID", "")
+    is_admin = bool(admin_id) and caller == admin_id
+
+    # Non-admins can only see their own contributions
+    contributed_by = caller if (mine or not is_admin) else None
+
+    return _list(status=status, target=target, contributed_by=contributed_by, limit=limit)
+
+
+@mcp.tool()
+def review_contribution(
+    contribution_id: str,
+    action: str,
+    ctx: Context,
+    rejection_reason: str = "",
+) -> dict:
+    """
+    Publish or reject a pending contribution. Admin only.
+
+    On publish: copies the entry into the target shared collection (terms_shared,
+    thesaurus, rubrics, or templates). On reject: marks as rejected with reason.
+
+    Args:
+        contribution_id: UUID of the contribution to review
+        action: "publish" or "reject"
+        rejection_reason: Required when action="reject"
+
+    Returns:
+        {success, contribution_id, action, target_collection, reviewed_at}
+    """
+    err = _require_admin(ctx)
+    if err:
+        return {"success": False, "error": err}
+
+    from src.tools.contributions import review_contribution as _review
+    return _review(
+        contribution_id=contribution_id,
+        action=action,
+        reviewed_by=_user_id(ctx),
+        rejection_reason=rejection_reason,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Internal: Telegram notification for new contributions
+# ---------------------------------------------------------------------------
+
+def _notify_contribution(contribution_id: str, target: str, label: str, contributed_by: str) -> None:
+    """Fire-and-forget Telegram notification to admin on new contribution."""
+    import asyncio
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_OWNER_CHAT_ID", "")
+    if not token or not chat_id:
+        return
+
+    text = (
+        f"📬 *New Contribution*\n\n"
+        f"Type: `{target}`\n"
+        f"Entry: `{label}`\n"
+        f"From: `{contributed_by}`\n"
+        f"ID: `{contribution_id}`\n\n"
+        f"Review with `list_contributions()` → `review_contribution()`"
+    )
+
+    async def _send():
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                    timeout=5.0,
+                )
+        except Exception as e:
+            logger.warning("Telegram contribution notification failed", error=str(e))
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_send())
+        else:
+            loop.run_until_complete(_send())
+    except Exception:
+        pass

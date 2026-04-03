@@ -97,43 +97,69 @@ def search_terms(
     language: Optional[str] = None,
     top_k: int = 8,
     user_id: str = "default",
+    include_shared: bool = True,
 ) -> dict:
-    """Search the user's terminology dictionary for relevant entries."""
-    collection = get_collection_names(user_id)["terms"]
+    """Search the user's terminology dictionary and (optionally) the shared published pool.
 
-    filter_conditions = {}
+    Personal terms take precedence — if the same preferred term appears in both, the personal
+    entry is returned and the shared duplicate is dropped.
+    """
+    from src.tools.collections import get_core_collection_names
+
+    filter_conditions: dict = {}
     if domain:
         filter_conditions["domain"] = domain
     if language:
         filter_conditions["language"] = language
 
-    try:
-        raw_results = semantic_search(
-            collection_name=collection,
-            query=query,
-            limit=top_k,
-            filter_conditions=filter_conditions if filter_conditions else None,
-        )
+    def _fetch(collection: str, source: str) -> list:
+        try:
+            raw = semantic_search(
+                collection_name=collection,
+                query=query,
+                limit=top_k,
+                filter_conditions=filter_conditions if filter_conditions else None,
+            )
+            out = []
+            for r in raw:
+                meta = r.get("metadata", {})
+                out.append({
+                    "score": round(r["score"], 4),
+                    "preferred": meta.get("preferred", r.get("title", "")),
+                    "avoid": meta.get("avoid", ""),
+                    "domain": meta.get("domain"),
+                    "language": meta.get("language"),
+                    "why": meta.get("why", ""),
+                    "example_bad": meta.get("example_bad", ""),
+                    "example_good": meta.get("example_good", ""),
+                    "document_id": r.get("document_id"),
+                    "source": source,
+                })
+            return out
+        except Exception:
+            return []
 
-        results = []
-        for r in raw_results:
-            meta = r.get("metadata", {})
-            results.append({
-                "score": round(r["score"], 4),
-                "preferred": meta.get("preferred", r.get("title", "")),
-                "avoid": meta.get("avoid", ""),
-                "domain": meta.get("domain"),
-                "language": meta.get("language"),
-                "why": meta.get("why", ""),
-                "example_bad": meta.get("example_bad", ""),
-                "example_good": meta.get("example_good", ""),
-                "document_id": r.get("document_id"),
-            })
+    personal = _fetch(get_collection_names(user_id)["terms"], "personal")
 
-        return {"success": True, "results": results, "total": len(results)}
-    except Exception as e:
-        logger.error("Term search failed", error=str(e))
-        return {"success": False, "error": str(e), "results": []}
+    shared: list = []
+    if include_shared:
+        shared_col = get_core_collection_names().get("terms_shared")
+        if shared_col:
+            shared = _fetch(shared_col, "shared")
+
+    # Merge: personal wins; deduplicate by preferred term (case-insensitive)
+    seen_preferred: set = {r["preferred"].lower() for r in personal}
+    merged = list(personal)
+    for r in shared:
+        if r["preferred"].lower() not in seen_preferred:
+            merged.append(r)
+            seen_preferred.add(r["preferred"].lower())
+
+    # Re-sort by score and cap at top_k
+    merged.sort(key=lambda x: x["score"], reverse=True)
+    merged = merged[:top_k]
+
+    return {"success": True, "results": merged, "total": len(merged)}
 
 
 def delete_term(document_id: str, user_id: str = "default") -> dict:
