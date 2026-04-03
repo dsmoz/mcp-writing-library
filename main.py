@@ -18,11 +18,14 @@ from dotenv import load_dotenv
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-# Fix for macOS UF_HIDDEN flag preventing .pth file processing in .venv directories.
-# kbase-core editable install requires explicit sys.path entry.
-kbase_core_path = project_root.parent / 'libraries' / 'kbase-core'
-if kbase_core_path.exists():
-    sys.path.insert(0, str(kbase_core_path))
+# kbase-core: vendored in vendor/ (Railway) or installed locally from libraries/
+vendor_path = project_root / 'vendor'
+if vendor_path.exists():
+    sys.path.insert(0, str(vendor_path))
+else:
+    kbase_core_path = project_root.parent / 'libraries' / 'kbase-core'
+    if kbase_core_path.exists():
+        sys.path.insert(0, str(kbase_core_path))
 
 # Load environment variables
 env_file = os.getenv('ENV_FILE', str(project_root / '.env'))
