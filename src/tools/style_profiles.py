@@ -13,7 +13,10 @@ from src.tools.styles import VALID_STYLES
 
 logger = structlog.get_logger(__name__)
 
-COLLECTION_NAME = "writing_style_profiles"
+
+def _style_profiles_collection(user_id: str = "default") -> str:
+    from src.tools.collections import get_user_collection_names
+    return get_user_collection_names(user_id)["style_profiles"]
 
 try:
     from kbase.vector.sync_indexing import index_document, delete_document_vectors
@@ -45,6 +48,7 @@ def save_style_profile(
     sample_excerpts: list,
     description: str = "",
     source_documents: Optional[list] = None,
+    user_id: str = "default",
 ) -> dict:
     """
     Save a writing style profile extracted from writing samples.
@@ -119,7 +123,7 @@ def save_style_profile(
 
     try:
         point_ids = index_document(
-            collection_name=COLLECTION_NAME,
+            collection_name=_style_profiles_collection(user_id),
             document_id=document_id,
             title=title,
             content=embed_text,
@@ -138,7 +142,7 @@ def save_style_profile(
         return {"success": False, "error": str(e)}
 
 
-def load_style_profile(name: str) -> dict:
+def load_style_profile(name: str, user_id: str = "default") -> dict:
     """
     Load a saved style profile by exact name.
 
@@ -156,7 +160,7 @@ def load_style_profile(name: str) -> dict:
         from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
         results, _ = client.scroll(
-            collection_name=COLLECTION_NAME,
+            collection_name=_style_profiles_collection(user_id),
             scroll_filter=Filter(
                 must=[FieldCondition(key="name", match=MatchValue(value=name.strip()))]
             ),
@@ -184,6 +188,7 @@ def update_style_profile(
     new_source_documents: Optional[list] = None,
     description: Optional[str] = None,
     score_weight: float = 0.3,
+    user_id: str = "default",
 ) -> dict:
     """
     Merge new evidence into an existing style profile without overwriting it.
@@ -211,7 +216,7 @@ def update_style_profile(
         return {"success": False, "error": "score_weight must be between 0.0 (exclusive) and 1.0"}
 
     # Load existing profile
-    load_result = load_style_profile(name)
+    load_result = load_style_profile(name, user_id=user_id)
     if not load_result["success"]:
         return load_result
 
@@ -280,7 +285,7 @@ def update_style_profile(
         from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
         old_results, _ = client.scroll(
-            collection_name=COLLECTION_NAME,
+            collection_name=_style_profiles_collection(user_id),
             scroll_filter=Filter(
                 must=[FieldCondition(key="name", match=MatchValue(value=name.strip()))]
             ),
@@ -290,7 +295,7 @@ def update_style_profile(
         )
         if old_results and delete_document_vectors is not None:
             delete_document_vectors(
-                collection_name=COLLECTION_NAME,
+                collection_name=_style_profiles_collection(user_id),
                 document_id=old_results[0].payload.get("document_id", str(old_results[0].id)),
             )
     except Exception as e:
@@ -305,6 +310,7 @@ def update_style_profile(
         sample_excerpts=merged_excerpts,
         description=merged_description,
         source_documents=merged_sources,
+        user_id=user_id,
     )
 
     if result.get("success"):
@@ -321,6 +327,7 @@ def harvest_corrections_to_profile(
     domain: Optional[str] = None,
     min_corrections: int = 3,
     top_k: int = 20,
+    user_id: str = "default",
 ) -> dict:
     """
     Scan human-corrected passages in the library and propose additions to a style profile.
@@ -359,7 +366,7 @@ def harvest_corrections_to_profile(
         return {"success": False, "error": "profile_name cannot be empty"}
 
     # Verify profile exists
-    load_result = load_style_profile(profile_name)
+    load_result = load_style_profile(profile_name, user_id=user_id)
     if not load_result["success"]:
         return load_result
 
@@ -368,7 +375,7 @@ def harvest_corrections_to_profile(
 
     try:
         from src.tools.collections import get_collection_names
-        collection = get_collection_names()["passages"]
+        collection = get_collection_names(user_id)["passages"]
 
         filter_conditions: dict = {"entry_type": "correction"}
         if language:
@@ -487,7 +494,7 @@ def harvest_corrections_to_profile(
         return {"success": False, "error": str(e)}
 
 
-def search_style_profiles(text: str, top_k: int = 3) -> dict:
+def search_style_profiles(text: str, top_k: int = 3, user_id: str = "default") -> dict:
     """
     Find the style profiles most semantically similar to a text sample.
 
@@ -505,7 +512,7 @@ def search_style_profiles(text: str, top_k: int = 3) -> dict:
 
     try:
         raw_results = semantic_search(
-            collection_name=COLLECTION_NAME,
+            collection_name=_style_profiles_collection(user_id),
             query=text,
             limit=top_k,
         )

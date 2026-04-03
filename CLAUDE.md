@@ -2,13 +2,39 @@
 
 MCP server for writing quality, evidence verification, and document intelligence. Backed by Qdrant hybrid search.
 
+## Multi-Tenant Architecture
+
+The server uses **collection-prefix isolation (Option B)** to support multiple users on one Qdrant instance.
+
+### Collection taxonomy
+
+| Type | Collections | Isolation |
+|------|-------------|-----------|
+| **Per-user** | `{client_id}_writing_passages`, `{client_id}_writing_terms`, `{client_id}_writing_style_profiles` | Scoped to OAuth `client_id`; never visible to other users |
+| **Core/shared** | `writing_thesaurus`, `writing_rubrics`, `writing_templates` | Global; read by all users; managed by seed scripts |
+
+### How user_id flows
+
+1. HTTP transport: FastMCP calls `RemoteTokenVerifier.verify_token()` → returns `AccessToken(client_id=...)` → `ctx.client_id` in tool handlers
+2. `_user_id(ctx)` in `server.py` extracts `ctx.client_id`, falls back to `"default"` when None (stdio mode or unconfigured)
+3. `get_user_collection_names(user_id)` in `collections.py` prefixes with sanitised client_id → `{uid}_writing_passages` etc.
+4. Per-user collections are created lazily via `setup_collections(user_id)` on first call
+
+### stdio mode / local dev
+
+With `TRANSPORT=stdio`, there is no auth context. All tools operate on `default_writing_passages`, `default_writing_terms`, `default_writing_style_profiles`. Core collections are always shared.
+
+### client_id sanitisation
+
+`_safe_user_id()` replaces any character outside `[a-zA-Z0-9_-]` with `_` to produce valid Qdrant collection name segments.
+
 ## Module Reference
 
 | Module | Functions | Description |
 |--------|-----------|-------------|
-| `src/tools/passages` | `add_passage`, `search_passages`, `update_passage`, `delete_passage`, `batch_add_passages` | Store and retrieve exemplary writing passages |
-| `src/tools/terms` | `add_term`, `search_terms`, `update_term`, `delete_term`, `batch_add_terms` | Store and retrieve terminology dictionary entries |
-| `src/tools/collections` | `get_collection_names`, `setup_collections`, `get_stats` | Manage Qdrant collections (6: passages, terms, style_profiles, rubrics, templates, writing_thesaurus) |
+| `src/tools/passages` | `add_passage`, `search_passages`, `update_passage`, `delete_passage`, `batch_add_passages` | Store and retrieve exemplary writing passages (per-user) |
+| `src/tools/terms` | `add_term`, `search_terms`, `update_term`, `delete_term`, `batch_add_terms` | Store and retrieve terminology dictionary entries (per-user) |
+| `src/tools/collections` | `get_collection_names`, `get_user_collection_names`, `get_core_collection_names`, `setup_collections`, `setup_user_collections`, `get_stats` | Manage Qdrant collections; user_id-aware |
 | `src/tools/export` | `export_library` | Export any collection to JSON or CSV |
 | `src/tools/styles` | `list_styles` | Writing style registry (14 labels across 4 categories) |
 | `src/tools/plagiarism` | `check_internal_similarity`, `check_external_similarity`, `score_external_similarity` | Similarity detection against library and web |

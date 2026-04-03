@@ -30,7 +30,15 @@ Tools:
 import os
 import sys
 from typing import Optional, List
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
+
+
+def _user_id(ctx: Context) -> str:
+    """Extract client_id from OAuth context; fall back to 'default' in stdio mode."""
+    if ctx is None:
+        return "default"
+    client_id = ctx.client_id
+    return client_id if client_id else "default"
 
 
 class RemoteTokenVerifier:
@@ -100,6 +108,7 @@ mcp = _build_mcp()
 @mcp.tool()
 def search_passages(
     query: str,
+    ctx: Context,
     doc_type: Optional[str] = None,
     language: Optional[str] = None,
     domain: Optional[str] = None,
@@ -136,12 +145,14 @@ def search_passages(
     return _search(
         query=query, doc_type=doc_type, language=language, domain=domain,
         style=style, rubric_section=rubric_section, top_k=top_k,
+        user_id=_user_id(ctx),
     )
 
 
 @mcp.tool()
 def add_passage(
     text: str,
+    ctx: Context,
     doc_type: str = "general",
     language: str = "en",
     domain: str = "general",
@@ -181,6 +192,7 @@ def add_passage(
         text=text, doc_type=doc_type, language=language, domain=domain,
         quality_notes=quality_notes, tags=tags or [], source=source,
         style=style or [], rubric_section=rubric_section,
+        user_id=_user_id(ctx),
     )
 
 
@@ -208,6 +220,7 @@ def list_styles() -> dict:
 @mcp.tool()
 def search_terms(
     query: str,
+    ctx: Context,
     domain: Optional[str] = None,
     language: Optional[str] = None,
     top_k: int = 8,
@@ -228,12 +241,13 @@ def search_terms(
         List of terminology entries with preferred/avoid pairs and examples
     """
     from src.tools.terms import search_terms as _search
-    return _search(query=query, domain=domain, language=language, top_k=top_k)
+    return _search(query=query, domain=domain, language=language, top_k=top_k, user_id=_user_id(ctx))
 
 
 @mcp.tool()
 def add_term(
     preferred: str,
+    ctx: Context,
     avoid: str = "",
     domain: str = "general",
     language: str = "en",
@@ -263,6 +277,7 @@ def add_term(
     return _add(
         preferred=preferred, avoid=avoid, domain=domain, language=language,
         why=why, example_bad=example_bad, example_good=example_good,
+        user_id=_user_id(ctx),
     )
 
 
@@ -271,6 +286,7 @@ def record_correction(
     original: str,
     corrected: str,
     issue_type: str,
+    ctx: Context,
     doc_type: str = "general",
     language: str = "en",
     domain: str = "general",
@@ -306,11 +322,12 @@ def record_correction(
     return _record(
         original=original, corrected=corrected, issue_type=issue_type,
         doc_type=doc_type, language=language, domain=domain, source=source,
+        user_id=_user_id(ctx),
     )
 
 
 @mcp.tool()
-def delete_passage(document_id: str) -> dict:
+def delete_passage(document_id: str, ctx: Context) -> dict:
     """
     Delete a passage from the writing library by document_id.
 
@@ -325,12 +342,13 @@ def delete_passage(document_id: str) -> dict:
         or {success: False, error} if not found or deletion fails
     """
     from src.tools.passages import delete_passage as _delete
-    return _delete(document_id=document_id)
+    return _delete(document_id=document_id, user_id=_user_id(ctx))
 
 
 @mcp.tool()
 def update_passage(
     document_id: str,
+    ctx: Context,
     text: Optional[str] = None,
     doc_type: Optional[str] = None,
     language: Optional[str] = None,
@@ -366,11 +384,12 @@ def update_passage(
         document_id=document_id,
         text=text, doc_type=doc_type, language=language, domain=domain,
         quality_notes=quality_notes, tags=tags, source=source, style=style,
+        user_id=_user_id(ctx),
     )
 
 
 @mcp.tool()
-def delete_term(document_id: str) -> dict:
+def delete_term(document_id: str, ctx: Context) -> dict:
     """
     Delete a terminology entry from the writing library by document_id.
 
@@ -385,12 +404,13 @@ def delete_term(document_id: str) -> dict:
         or {success: False, error} if not found or deletion fails
     """
     from src.tools.terms import delete_term as _delete
-    return _delete(document_id=document_id)
+    return _delete(document_id=document_id, user_id=_user_id(ctx))
 
 
 @mcp.tool()
 def update_term(
     document_id: str,
+    ctx: Context,
     preferred: Optional[str] = None,
     avoid: Optional[str] = None,
     domain: Optional[str] = None,
@@ -424,11 +444,12 @@ def update_term(
         document_id=document_id,
         preferred=preferred, avoid=avoid, domain=domain, language=language,
         why=why, example_bad=example_bad, example_good=example_good,
+        user_id=_user_id(ctx),
     )
 
 
 @mcp.tool()
-def get_library_stats() -> dict:
+def get_library_stats(ctx: Context) -> dict:
     """
     Return point counts for both Qdrant collections.
 
@@ -438,11 +459,11 @@ def get_library_stats() -> dict:
         Stats for writing_passages and writing_terms collections
     """
     from src.tools.collections import get_stats
-    return get_stats()
+    return get_stats(user_id=_user_id(ctx))
 
 
 @mcp.tool()
-def setup_collections() -> dict:
+def setup_collections(ctx: Context) -> dict:
     """
     Create or verify Qdrant collections for the writing library.
 
@@ -452,12 +473,13 @@ def setup_collections() -> dict:
         Status for each collection (created|already_exists|error)
     """
     from src.tools.collections import setup_collections as _setup
-    return _setup()
+    return _setup(user_id=_user_id(ctx))
 
 
 @mcp.tool()
 def check_internal_similarity(
     text: str,
+    ctx: Context,
     threshold: float = 0.85,
     top_k_per_sentence: int = 3,
     verdict_threshold_pct: float = 30.0,
@@ -484,6 +506,7 @@ def check_internal_similarity(
         threshold=threshold,
         top_k_per_sentence=top_k_per_sentence,
         verdict_threshold_pct=verdict_threshold_pct,
+        user_id=_user_id(ctx),
     )
 
 
@@ -528,6 +551,7 @@ def save_style_profile(
     rules: list,
     anti_patterns: list,
     sample_excerpts: list,
+    ctx: Context,
     description: str = "",
     source_documents: list = [],
 ) -> dict:
@@ -567,11 +591,12 @@ def save_style_profile(
         sample_excerpts=sample_excerpts,
         description=description,
         source_documents=source_documents,
+        user_id=_user_id(ctx),
     )
 
 
 @mcp.tool()
-def load_style_profile(name: str) -> dict:
+def load_style_profile(name: str, ctx: Context) -> dict:
     """
     Load a saved writing style profile by exact name.
 
@@ -585,12 +610,13 @@ def load_style_profile(name: str) -> dict:
         {success, profile} with full profile payload, or {success: False, error}
     """
     from src.tools.style_profiles import load_style_profile as _load
-    return _load(name=name)
+    return _load(name=name, user_id=_user_id(ctx))
 
 
 @mcp.tool()
 def update_style_profile(
     name: str,
+    ctx: Context,
     new_style_scores: Optional[dict] = None,
     new_rules: Optional[List[str]] = None,
     new_anti_patterns: Optional[List[str]] = None,
@@ -634,12 +660,14 @@ def update_style_profile(
         new_source_documents=new_source_documents,
         description=description,
         score_weight=score_weight,
+        user_id=_user_id(ctx),
     )
 
 
 @mcp.tool()
 def harvest_corrections_to_profile(
     profile_name: str,
+    ctx: Context,
     language: Optional[str] = None,
     domain: Optional[str] = None,
     min_corrections: int = 3,
@@ -679,11 +707,12 @@ def harvest_corrections_to_profile(
         domain=domain,
         min_corrections=min_corrections,
         top_k=top_k,
+        user_id=_user_id(ctx),
     )
 
 
 @mcp.tool()
-def search_style_profiles(text: str, top_k: int = 3) -> dict:
+def search_style_profiles(text: str, ctx: Context, top_k: int = 3) -> dict:
     """
     Find saved style profiles most similar to a writing sample.
 
@@ -698,7 +727,7 @@ def search_style_profiles(text: str, top_k: int = 3) -> dict:
         {success, results: [{score, profile}], total}
     """
     from src.tools.style_profiles import search_style_profiles as _search
-    return _search(text=text, top_k=top_k)
+    return _search(text=text, top_k=top_k, user_id=_user_id(ctx))
 
 
 @mcp.tool()
@@ -733,7 +762,7 @@ def score_external_similarity(
 
 
 @mcp.tool()
-def batch_add_passages(items: list[dict]) -> dict:
+def batch_add_passages(items: list[dict], ctx: Context) -> dict:
     """
     Add multiple writing passages in a single call.
 
@@ -749,11 +778,11 @@ def batch_add_passages(items: list[dict]) -> dict:
         {success: True, total, succeeded, failed, results: [per-item result with index]}
     """
     from src.tools.passages import batch_add_passages as _batch
-    return _batch(items=items)
+    return _batch(items=items, user_id=_user_id(ctx))
 
 
 @mcp.tool()
-def batch_add_terms(items: list[dict]) -> dict:
+def batch_add_terms(items: list[dict], ctx: Context) -> dict:
     """
     Add multiple terminology entries in a single call.
 
@@ -769,11 +798,11 @@ def batch_add_terms(items: list[dict]) -> dict:
         {success: True, total, succeeded, failed, results: [per-item result with index]}
     """
     from src.tools.terms import batch_add_terms as _batch
-    return _batch(items=items)
+    return _batch(items=items, user_id=_user_id(ctx))
 
 
 @mcp.tool()
-def export_library(collection: str, output_format: str = "json") -> dict:
+def export_library(collection: str, ctx: Context, output_format: str = "json") -> dict:
     """
     Export all points from a writing library collection.
 
@@ -793,7 +822,7 @@ def export_library(collection: str, output_format: str = "json") -> dict:
         On failure: {success: False, error}.
     """
     from src.tools.export import export_library as _export
-    return _export(collection=collection, output_format=output_format)
+    return _export(collection=collection, output_format=output_format, user_id=_user_id(ctx))
 
 
 @mcp.tool()
@@ -1118,7 +1147,7 @@ def detect_authorship_shift(
 
 
 @mcp.tool()
-def score_semantic_ai_likelihood(text: str, top_k: int = 10) -> dict:
+def score_semantic_ai_likelihood(text: str, ctx: Context, top_k: int = 10) -> dict:
     """
     Score how semantically similar text is to AI-corrected vs. human-corrected passages.
 
@@ -1139,7 +1168,7 @@ def score_semantic_ai_likelihood(text: str, top_k: int = 10) -> dict:
          human_sample_count, method ("semantic"|"insufficient_data")}
     """
     from src.tools.ai_patterns import score_semantic_ai_likelihood as _score
-    return _score(text=text, top_k=top_k)
+    return _score(text=text, top_k=top_k, user_id=_user_id(ctx))
 
 
 @mcp.tool()

@@ -38,8 +38,9 @@ def add_passage(
     source: str = "manual",
     style: Optional[List[str]] = None,
     rubric_section: Optional[str] = None,
+    user_id: str = "default",
 ) -> dict:
-    """Store an exemplary writing passage in the writing_passages collection."""
+    """Store an exemplary writing passage in the user's writing_passages collection."""
     if doc_type not in VALID_DOC_TYPES:
         return {
             "success": False,
@@ -63,7 +64,7 @@ def add_passage(
         style = [s for s in style if s in VALID_STYLES]
 
     document_id = str(uuid4())
-    collection = get_collection_names()["passages"]
+    collection = get_collection_names(user_id)["passages"]
     title = f"[{doc_type.upper()} | {language.upper()}] {text[:60]}..."
 
     metadata = {
@@ -108,9 +109,10 @@ def search_passages(
     style: Optional[str] = None,
     rubric_section: Optional[str] = None,
     top_k: int = 5,
+    user_id: str = "default",
 ) -> dict:
     """Search for exemplary writing passages by semantic similarity."""
-    collection = get_collection_names()["passages"]
+    collection = get_collection_names(user_id)["passages"]
 
     filter_conditions = {}
     if doc_type:
@@ -165,9 +167,9 @@ def search_passages(
         return {"success": False, "error": str(e), "results": []}
 
 
-def delete_passage(document_id: str) -> dict:
-    """Delete a passage from the writing_passages collection by document_id."""
-    collection = get_collection_names()["passages"]
+def delete_passage(document_id: str, user_id: str = "default") -> dict:
+    """Delete a passage from the user's writing_passages collection by document_id."""
+    collection = get_collection_names(user_id)["passages"]
     try:
         check_result = check_document_indexed(
             collection_name=collection,
@@ -186,7 +188,7 @@ def delete_passage(document_id: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def batch_add_passages(items: list) -> dict:
+def batch_add_passages(items: list, user_id: str = "default") -> dict:
     """Add multiple writing passages in a single call. Never raises; collects per-item errors."""
     results = []
     succeeded = 0
@@ -212,6 +214,7 @@ def batch_add_passages(items: list) -> dict:
             source=item.get("source", "manual"),
             style=item.get("style"),
             rubric_section=item.get("rubric_section"),
+            user_id=user_id,
         )
         result["index"] = i
         results.append(result)
@@ -238,6 +241,7 @@ def record_correction(
     language: str = "en",
     domain: str = "general",
     source: str = "manual",
+    user_id: str = "default",
 ) -> dict:
     """Store a before/after correction pair in the passages collection.
 
@@ -262,7 +266,7 @@ def record_correction(
 
     from uuid import uuid4
     correction_id = str(uuid4())
-    collection = get_collection_names()["passages"]
+    collection = get_collection_names(user_id)["passages"]
 
     results = {}
     for role, text, style_tag in [
@@ -322,6 +326,7 @@ def update_passage(
     tags: Optional[List[str]] = None,
     source: Optional[str] = None,
     style: Optional[List[str]] = None,
+    user_id: str = "default",
 ) -> dict:
     """Update a passage by deleting and re-indexing with merged metadata."""
     updated_fields = [
@@ -351,7 +356,7 @@ def update_passage(
             "error": f"Invalid domain '{domain}'. Must be one of: {sorted(VALID_DOMAINS)}",
         }
 
-    collection = get_collection_names()["passages"]
+    collection = get_collection_names(user_id)["passages"]
 
     try:
         # Fetch current document to merge metadata

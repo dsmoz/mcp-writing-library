@@ -35,8 +35,9 @@ def add_term(
     why: str = "",
     example_bad: str = "",
     example_good: str = "",
+    user_id: str = "default",
 ) -> dict:
-    """Store a terminology entry in the writing_terms collection."""
+    """Store a terminology entry in the user's writing_terms collection."""
     if not preferred or not preferred.strip():
         return {"success": False, "error": "preferred term cannot be empty"}
     if domain not in VALID_DOMAINS:
@@ -46,7 +47,7 @@ def add_term(
         }
 
     document_id = str(uuid4())
-    collection = get_collection_names()["terms"]
+    collection = get_collection_names(user_id)["terms"]
 
     content_parts = [
         f"Preferred term: {preferred}",
@@ -95,9 +96,10 @@ def search_terms(
     domain: Optional[str] = None,
     language: Optional[str] = None,
     top_k: int = 8,
+    user_id: str = "default",
 ) -> dict:
-    """Search the terminology dictionary for relevant entries."""
-    collection = get_collection_names()["terms"]
+    """Search the user's terminology dictionary for relevant entries."""
+    collection = get_collection_names(user_id)["terms"]
 
     filter_conditions = {}
     if domain:
@@ -134,9 +136,9 @@ def search_terms(
         return {"success": False, "error": str(e), "results": []}
 
 
-def delete_term(document_id: str) -> dict:
-    """Delete a term from the writing_terms collection by document_id."""
-    collection = get_collection_names()["terms"]
+def delete_term(document_id: str, user_id: str = "default") -> dict:
+    """Delete a term from the user's writing_terms collection by document_id."""
+    collection = get_collection_names(user_id)["terms"]
     try:
         check_result = check_document_indexed(
             collection_name=collection,
@@ -155,7 +157,7 @@ def delete_term(document_id: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def batch_add_terms(items: list) -> dict:
+def batch_add_terms(items: list, user_id: str = "default") -> dict:
     """Add multiple terminology entries in a single call. Never raises; collects per-item errors."""
     results = []
     succeeded = 0
@@ -179,6 +181,7 @@ def batch_add_terms(items: list) -> dict:
             why=item.get("why", ""),
             example_bad=item.get("example_bad", ""),
             example_good=item.get("example_good", ""),
+            user_id=user_id,
         )
         result["index"] = i
         results.append(result)
@@ -206,6 +209,7 @@ def update_term(
     why: Optional[str] = None,
     example_bad: Optional[str] = None,
     example_good: Optional[str] = None,
+    user_id: str = "default",
 ) -> dict:
     """Update a term by deleting and re-indexing with merged metadata."""
     updated_fields = [
@@ -230,7 +234,7 @@ def update_term(
             "error": f"Invalid language '{language}'. Must be one of: {sorted(VALID_LANGUAGES)}",
         }
 
-    collection = get_collection_names()["terms"]
+    collection = get_collection_names(user_id)["terms"]
 
     try:
         client = get_qdrant_client()

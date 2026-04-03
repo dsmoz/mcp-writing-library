@@ -101,17 +101,18 @@ def check_internal_similarity(
     threshold: float = _DEFAULT_INTERNAL_THRESHOLD,
     top_k_per_sentence: int = 3,
     verdict_threshold_pct: float = _DEFAULT_VERDICT_PCT,
+    user_id: str = "default",
 ) -> dict:
     """
     Check if a passage is too similar to content already in the writing library.
 
-    Splits the input into sentences and searches each against the writing_passages
-    Qdrant collection. Returns flagged sentences and an overall similarity score.
+    Splits the input into sentences and searches each against the user's
+    writing_passages Qdrant collection. Returns flagged sentences and an overall similarity score.
     """
     if not text or not text.strip():
         return {"success": False, "error": "text cannot be empty"}
 
-    collection = get_collection_names()["passages"]
+    collection = get_collection_names(user_id)["passages"]
     sentences = _split_sentences(text)
 
     if not sentences:
