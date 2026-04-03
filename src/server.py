@@ -1139,7 +1139,7 @@ def suggest_alternatives(
         word: The word to look up (e.g. "leverage", "robust", "ensure")
         language: Language of the word: en|pt
         domain: Thematic domain: srhr|governance|climate|general|m-and-e|health|finance|org
-        context_sentence: Optional sentence where the word appears (used for ranking)
+        context_sentence: Optional sentence where the word appears (reserved for future semantic re-ranking)
         top_k: Maximum alternatives to return (default 5)
 
     Returns:

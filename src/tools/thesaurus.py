@@ -206,7 +206,7 @@ def suggest_alternatives(
     word: str,
     language: str = "en",
     domain: str = "general",
-    context_sentence: Optional[str] = None,
+    context_sentence: Optional[str] = None,  # Reserved for future semantic re-ranking; currently unused
     top_k: int = 5,
 ) -> dict:
     """
