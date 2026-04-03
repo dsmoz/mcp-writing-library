@@ -64,6 +64,10 @@ class RemoteTokenVerifier:
     async def verify_token(self, token: str) -> Optional[object]:
         import httpx
         from mcp.server.auth.provider import AccessToken
+        # Accept static API tokens (used by gateway and service-to-service calls)
+        api_tokens = [t.strip() for t in os.getenv("API_TOKENS", "").split(",") if t.strip()]
+        if token in api_tokens:
+            return AccessToken(token=token, client_id="gateway", scopes=["mcp"], expires_at=None)
         if not self._url or not self._secret:
             print("WARNING: OAUTH_INTROSPECT_URL or OAUTH_INTROSPECT_SECRET not set", file=sys.stderr)
             return None
