@@ -221,34 +221,40 @@ def test_flag_vocabulary_detects_headwords(monkeypatch):
     import src.tools.thesaurus as mod
     import json
 
+    # Bulk fetch mock: returns all entries in one call
     def mock_search(collection_name, query, limit, filter_conditions=None):
-        entries = {
-            "leverage": {
-                "headword": "leverage",
-                "language": "en",
-                "domain": "general",
-                "why_avoid": "AI overuse.",
-                "alternatives": json.dumps([{"word": "use", "meaning_nuance": "Direct", "register": "neutral", "when_to_use": "Default"}]),
-                "collocations": "[]",
-                "definition": "...", "part_of_speech": "verb", "register": "institutional",
-                "example_bad": "", "example_good": "", "source": "manual", "entry_type": "thesaurus",
+        return [
+            {
+                "score": 0.95,
+                "document_id": "id-leverage",
+                "title": "leverage",
+                "metadata": {
+                    "headword": "leverage",
+                    "language": "en",
+                    "domain": "general",
+                    "why_avoid": "AI overuse.",
+                    "alternatives": json.dumps([{"word": "use", "meaning_nuance": "Direct", "register": "neutral", "when_to_use": "Default"}]),
+                    "collocations": "[]",
+                    "definition": "...", "part_of_speech": "verb", "register": "institutional",
+                    "example_bad": "", "example_good": "", "source": "manual", "entry_type": "thesaurus",
+                },
             },
-            "ensure": {
-                "headword": "ensure",
-                "language": "en",
-                "domain": "general",
-                "why_avoid": "Weak AI filler.",
-                "alternatives": json.dumps([{"word": "guarantee", "meaning_nuance": "Stronger commitment", "register": "formal", "when_to_use": "High-stakes commitments"}]),
-                "collocations": "[]",
-                "definition": "...", "part_of_speech": "verb", "register": "institutional",
-                "example_bad": "", "example_good": "", "source": "manual", "entry_type": "thesaurus",
+            {
+                "score": 0.93,
+                "document_id": "id-ensure",
+                "title": "ensure",
+                "metadata": {
+                    "headword": "ensure",
+                    "language": "en",
+                    "domain": "general",
+                    "why_avoid": "Weak AI filler.",
+                    "alternatives": json.dumps([{"word": "guarantee", "meaning_nuance": "Stronger commitment", "register": "formal", "when_to_use": "High-stakes commitments"}]),
+                    "collocations": "[]",
+                    "definition": "...", "part_of_speech": "verb", "register": "institutional",
+                    "example_bad": "", "example_good": "", "source": "manual", "entry_type": "thesaurus",
+                },
             },
-        }
-        hits = []
-        for headword, meta in entries.items():
-            if headword in query.lower():
-                hits.append({"score": 0.95, "document_id": f"id-{headword}", "title": headword, "metadata": meta})
-        return hits
+        ]
 
     monkeypatch.setattr(mod, "semantic_search", mock_search)
     text = "We will leverage our networks to ensure maximum impact."
@@ -269,7 +275,8 @@ def test_flag_vocabulary_empty_text():
 
 def test_flag_vocabulary_clean_text(monkeypatch):
     import src.tools.thesaurus as mod
-    monkeypatch.setattr(mod, "semantic_search", lambda **kw: [])
+    # Bulk fetch returns empty list → no headwords in collection → clean
+    monkeypatch.setattr(mod, "semantic_search", lambda collection_name, query, limit, filter_conditions=None: [])
     result = mod.flag_vocabulary(text="The team met on Tuesday to discuss the findings.", language="en", domain="general")
     assert result["success"] is True
     assert result["flagged_count"] == 0
@@ -281,29 +288,28 @@ def test_flag_vocabulary_detects_multiword_headword(monkeypatch):
     import src.tools.thesaurus as mod
     import json
 
+    # Bulk fetch returns the single multi-word entry regardless of query
     def mock_search(collection_name, query, limit, filter_conditions=None):
-        if query == "capacity building":
-            return [{
-                "score": 0.95,
-                "document_id": "id-capacity-building",
-                "title": "capacity building",
-                "metadata": {
-                    "headword": "capacity building",
-                    "language": "en",
-                    "domain": "general",
-                    "why_avoid": "Jargon overused in development sector.",
-                    "alternatives": json.dumps([{"word": "skills development", "meaning_nuance": "More specific", "register": "neutral", "when_to_use": "Default"}]),
-                    "collocations": "[]",
-                    "definition": "The process of developing skills and abilities.",
-                    "part_of_speech": "phrase",
-                    "register": "institutional",
-                    "example_bad": "",
-                    "example_good": "",
-                    "source": "manual",
-                    "entry_type": "thesaurus",
-                },
-            }]
-        return []
+        return [{
+            "score": 0.95,
+            "document_id": "id-capacity-building",
+            "title": "capacity building",
+            "metadata": {
+                "headword": "capacity building",
+                "language": "en",
+                "domain": "general",
+                "why_avoid": "Jargon overused in development sector.",
+                "alternatives": json.dumps([{"word": "skills development", "meaning_nuance": "More specific", "register": "neutral", "when_to_use": "Default"}]),
+                "collocations": "[]",
+                "definition": "The process of developing skills and abilities.",
+                "part_of_speech": "phrase",
+                "register": "institutional",
+                "example_bad": "",
+                "example_good": "",
+                "source": "manual",
+                "entry_type": "thesaurus",
+            },
+        }]
 
     monkeypatch.setattr(mod, "semantic_search", mock_search)
     text = "This approach requires capacity building and robust systems."

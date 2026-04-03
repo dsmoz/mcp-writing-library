@@ -290,52 +290,61 @@ def flag_vocabulary(
 
     collection = get_collection_names()["thesaurus"]
 
-    # Single tokens (cleaned)
+    # --- Step 1: fetch all headwords for this language in one query ---
+    try:
+        all_entries = semantic_search(
+            collection_name=collection,
+            query="word vocabulary avoid alternative language",
+            limit=500,
+            filter_conditions={"language": language},
+        )
+    except Exception:
+        all_entries = []
+
+    headword_map: dict[str, dict] = {}  # headword (lower) -> metadata
+    for entry in all_entries:
+        meta = entry.get("metadata", {})
+        hw = meta.get("headword", "").lower()
+        if hw:
+            headword_map[hw] = {"meta": meta, "document_id": entry.get("document_id")}
+
+    if not headword_map:
+        return {
+            "success": True,
+            "flagged_count": 0,
+            "verdict": "clean",
+            "flagged": [],
+            "language": language,
+            "domain": domain,
+            "word_count": 0,
+        }
+
+    # --- Step 2: build candidate set from text ---
     tokens = [re.sub(r"[^\w\-]", "", w).lower() for w in text.split()]
     tokens = [t for t in tokens if len(t) > 2]
 
-    # Single-word candidates + multi-word n-grams (2 and 3 words)
-    words_to_check: set[str] = set(tokens)
+    candidates: set[str] = set(tokens)
     for n in (2, 3):
         for i in range(len(tokens) - n + 1):
-            ngram = " ".join(tokens[i : i + n])
-            words_to_check.add(ngram)
+            candidates.add(" ".join(tokens[i: i + n]))
 
-    seen_headwords: set = set()
+    # --- Step 3: intersect candidates against known headwords ---
     flagged = []
-
-    for clean_word in words_to_check:
-        if not clean_word or len(clean_word) < 3:
-            continue
-        try:
-            hits = semantic_search(
-                collection_name=collection,
-                query=clean_word,
-                limit=5,
-                filter_conditions={"language": language},
-            )
-        except Exception:
-            continue
-
-        for hit in hits:
-            headword = hit.get("metadata", {}).get("headword", "").lower()
-            if headword == clean_word and headword not in seen_headwords:
-                seen_headwords.add(headword)
-                meta = hit.get("metadata", {})
-                alternatives_preview = json.loads(meta.get("alternatives", "[]"))[:3]
-                # For multi-word headwords, count phrase occurrences in text
-                if " " in clean_word or "-" in clean_word:
-                    occurrences = text.lower().count(clean_word)
-                else:
-                    occurrences = tokens.count(clean_word)
-                flagged.append({
-                    "headword": meta.get("headword"),
-                    "occurrences": occurrences,
-                    "why_avoid": meta.get("why_avoid", ""),
-                    "alternatives_preview": alternatives_preview,
-                    "document_id": hit.get("document_id"),
-                })
-                break
+    for hw in candidates & headword_map.keys():
+        entry_data = headword_map[hw]
+        meta = entry_data["meta"]
+        alternatives_preview = json.loads(meta.get("alternatives", "[]"))[:3]
+        if " " in hw or "-" in hw:
+            occurrences = text.lower().count(hw)
+        else:
+            occurrences = tokens.count(hw)
+        flagged.append({
+            "headword": meta.get("headword"),
+            "occurrences": occurrences,
+            "why_avoid": meta.get("why_avoid", ""),
+            "alternatives_preview": alternatives_preview,
+            "document_id": entry_data["document_id"],
+        })
 
     verdict = "clean" if not flagged else ("review" if len(flagged) <= 3 else "ai-sounding")
     return {
