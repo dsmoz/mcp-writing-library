@@ -49,7 +49,7 @@ def main():
             port = int(os.getenv("PORT", "8000"))
             print(f"🌐 HTTP transport on {host}:{port}", file=sys.stderr)
             app = mcp.streamable_http_app()
-            uvicorn.run(app, host=host, port=port)
+            uvicorn.run(app, host=host, port=port, proxy_headers=True, forwarded_allow_ips="*")
         else:
             mcp.run()
     except ImportError as e:
