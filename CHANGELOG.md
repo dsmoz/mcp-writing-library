@@ -3,6 +3,27 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
+## [1.5.0] - 2026-04-04
+
+### Changed
+
+- `verify_claims` is now fully self-contained — checks for citation markers (APA/numeric) and ghost stats without external dependencies
+- `add_rubric_criterion`, `add_template`, `add_thesaurus_entry` are now admin-only (`_require_admin` guard); regular users must use `contribute_*()` path
+- `export_library` accepts only known collection aliases; raw Qdrant collection names are rejected
+
+### Removed
+
+- Zotero and Cerebellum cross-server HTTP search from evidence tool (`_search_zotero`, `_search_cerebellum`)
+- `research_paths` parameter from `verify_claims` (filesystem traversal risk in multi-tenant)
+- `top_k_per_claim` and `corroboration_threshold` parameters from `verify_claims`
+- `ZOTERO_MCP_URL`, `ZOTERO_MCP_TOKEN`, `ZOTERO_QDRANT_COLLECTION`, `CEREBELLUM_MCP_URL`, `CEREBELLUM_MCP_TOKEN` env vars
+
+### Security
+
+- Core shared collections (rubrics, templates, thesaurus) now protected from unauthorized writes by non-admin users
+- Export tool no longer leaks raw Qdrant collection names
+- Removed arbitrary filesystem read via `research_paths`
+
 ## [1.4.1] - 2026-04-03
 
 ### Fixed

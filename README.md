@@ -30,8 +30,6 @@ flowchart TD
     COLLECTIONS -.->|ensure all collections| Qdrant1
     PLAGIARISM -.->|sentence search| Qdrant1
     PLAGIARISM -.->|web search| Tavily(("Tavily API\noptional"))
-    EVIDENCE -.->|claim search| Zotero(("mcp-zotero-qdrant\nZotero KB"))
-    EVIDENCE -.->|claim search| Cerebellum(("mcp-cerebellum\nCerebellum KB"))
     CONSISTENCY -.->|profile match| Qdrant3
 ```
 
@@ -70,7 +68,7 @@ flowchart TD
 
 | Tool | Function | Description |
 |------|----------|-------------|
-| `verify_claims` | `verify_claims(text, domain, top_k_per_claim, research_paths)` | Hallucination detection; local files searched first, then Zotero + Cerebellum |
+| `verify_claims` | `verify_claims(text, domain)` | Citation-based claim verification with ghost-stat detection; fully self-contained |
 | `score_evidence_density` | `score_evidence_density(text, domain)` | Offline ratio of evidenced vs. bare assertions |
 
 ### Donor Rubrics
@@ -158,6 +156,7 @@ uv run python main.py
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.5.0 | 2026-04-04 | Remove external KB coupling; admin-guard core writes; restrict export aliases |
 | 1.4.1 | 2026-04-03 | Fix missing `psutil` dependency; restores search_terms, search_thesaurus, get_library_stats |
 | 1.4.0 | 2026-04-03 | Multi-tenant isolation, contribution moderation, channel-tagged style profiles |
 | 1.3.0 | 2026-04-03 | Railway HTTP deployment, bearer token auth, OpenAI embeddings (1536D), thesaurus ×91 |
