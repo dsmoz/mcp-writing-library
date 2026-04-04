@@ -5,6 +5,7 @@ from typing import Optional, List
 from uuid import uuid4
 import structlog
 
+from src.sentry import capture_tool_error
 from src.tools.collections import get_collection_names
 from src.tools.registry import VALID_DOC_TYPES, VALID_DOMAINS, VALID_LANGUAGES
 from src.tools.styles import VALID_STYLES
@@ -98,6 +99,7 @@ def add_passage(
         }
     except Exception as e:
         logger.error("Failed to add passage", error=str(e))
+        capture_tool_error(e, tool_name="add_passage", user_id=user_id)
         return {"success": False, "error": str(e)}
 
 
@@ -164,6 +166,7 @@ def search_passages(
         return {"success": True, "results": results, "total": len(results)}
     except Exception as e:
         logger.error("Passage search failed", error=str(e))
+        capture_tool_error(e, tool_name="search_passages", user_id=user_id)
         return {"success": False, "error": str(e), "results": []}
 
 
@@ -185,6 +188,7 @@ def delete_passage(document_id: str, user_id: str = "default") -> dict:
         return {"success": True, "document_id": document_id, "deleted": True}
     except Exception as e:
         logger.error("Failed to delete passage", error=str(e), document_id=document_id)
+        capture_tool_error(e, tool_name="delete_passage", document_id=document_id)
         return {"success": False, "error": str(e)}
 
 
@@ -304,6 +308,7 @@ def record_correction(
             }
         except Exception as e:
             logger.error("Failed to record correction", role=role, error=str(e))
+            capture_tool_error(e, tool_name="record_correction", role=role, user_id=user_id)
             results[role] = {"success": False, "error": str(e)}
 
     overall_success = all(v.get("success") for v in results.values())
@@ -433,6 +438,7 @@ def update_passage(
                 error=str(index_error),
                 document_id=document_id,
             )
+            capture_tool_error(index_error, tool_name="update_passage", phase="re-index", document_id=document_id)
             return {
                 "success": False,
                 "error": f"Re-index failed after deletion: {index_error}. Original payload preserved for recovery.",
@@ -450,4 +456,5 @@ def update_passage(
 
     except Exception as e:
         logger.error("Failed to update passage", error=str(e), document_id=document_id)
+        capture_tool_error(e, tool_name="update_passage", document_id=document_id)
         return {"success": False, "error": str(e)}

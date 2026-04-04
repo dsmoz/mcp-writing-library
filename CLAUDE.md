@@ -15,14 +15,22 @@ The server uses **collection-prefix isolation (Option B)** to support multiple u
 
 ### How user_id flows
 
-1. HTTP transport: FastMCP calls `RemoteTokenVerifier.verify_token()` → returns `AccessToken(client_id=...)` → `ctx.client_id` in tool handlers
+1. HTTP transport: `BearerAuthMiddleware` validates token against `API_TOKENS`. **Note:** the token validates access but does NOT extract a user_id — client_id resolution depends on MCP context negotiation.
 2. `_user_id(ctx)` in `server.py` extracts `ctx.client_id`, falls back to `"default"` when None (stdio mode or unconfigured)
 3. `get_user_collection_names(user_id)` in `collections.py` prefixes with sanitised client_id → `{uid}_writing_passages` etc.
 4. Per-user collections are created lazily via `setup_collections(user_id)` on first call
 
 ### stdio mode / local dev
 
-With `TRANSPORT=stdio`, there is no auth context. All tools operate on `default_writing_passages`, `default_writing_terms`, `default_writing_style_profiles`. Core collections are always shared.
+With `TRANSPORT=stdio`, there is no auth context. All tools operate on `default_writing_passages`, `default_writing_terms`, `default_writing_style_profiles`. Core collections are always shared. This is single-tenant by design.
+
+### HTTP mode / multi-tenant
+
+With `TRANSPORT=http` and `API_TOKENS` set, the Bearer token authenticates the caller but does **not** carry user identity. For true per-user isolation, the calling gateway must set MCP `client_id` correctly via context negotiation. Future work: JWT parsing or token-to-user mapping to extract user_id from the token itself.
+
+### Core collection access control
+
+Write operations on core/shared collections (`add_rubric_criterion`, `add_template`, `add_thesaurus_entry`) are **admin-only** — they require `ADMIN_CLIENT_ID` to be set and the caller's `client_id` to match. Regular users should use `contribute_*()` tools which queue entries for admin review.
 
 ### client_id sanitisation
 
@@ -42,7 +50,7 @@ With `TRANSPORT=stdio`, there is no auth context. All tools operate on `default_
 | `src/tools/style_profiles` | `save_style_profile`, `load_style_profile`, `update_style_profile`, `search_style_profiles`, `list_style_profiles`, `harvest_corrections_to_profile` | Extract and retrieve writing style profiles from samples; channel-tagged |
 | `src/tools/ai_patterns` | `score_ai_patterns` | Detect AI writing patterns; 10 rule-based detectors; calibrated by `doc_type` |
 | `src/tools/thesaurus` | `add_thesaurus_entry`, `search_thesaurus`, `suggest_alternatives`, `flag_vocabulary` | Vocabulary intelligence: flag AI-pattern words, suggest naturalistic alternatives (EN + PT) |
-| `src/tools/evidence` | `verify_claims`, `score_evidence_density` | Evidence hallucination detection via Zotero + Cerebellum; domain-aware claim patterns |
+| `src/tools/evidence` | `verify_claims`, `score_evidence_density` | Citation-based claim verification, ghost-stat detection, evidence density scoring |
 | `src/tools/rubrics` | `add_rubric_criterion`, `score_against_rubric`, `list_rubric_donors` | Donor rubric alignment; USAID/UNDP/GF/EU/general criteria |
 | `src/tools/templates` | `add_template`, `check_structure`, `list_templates` | Document structure templates; detect present/missing sections |
 | `src/tools/consistency` | `score_voice_consistency`, `detect_authorship_shift` | Multi-author voice drift detection |
@@ -147,13 +155,10 @@ result = score_ai_patterns(
 result = verify_claims(
     text="...",
     domain="health",  # general|health|finance|governance|climate|m-and-e|org
-    top_k_per_claim=3,
-    # Optional: pass local research files to search first (no indexing)
-    research_paths=["/path/to/project/research/", "/path/to/specific-report.md"],
 )
 # Returns: overall_evidence_score, verdict, per-claim verdicts, ghost_stat flags
-# ghost_stat: True = number with no source trail (always a blocker)
-# Search order: local files → Zotero → Cerebellum (local match short-circuits remote)
+# ghost_stat: True = number with no citation (always a blocker)
+# Fully self-contained — checks for APA/numeric citation markers, no external KB
 ```
 
 ## Pattern 7 — Rubric Alignment
@@ -211,5 +216,5 @@ result = suggest_alternatives(word="alavancar", language="pt", domain="general")
   first use; the seed script also calls it automatically.
 - **Qdrant env vars required.** Set `QDRANT_URL` and `QDRANT_API_KEY` in `.env.local`.
 - **`language` accepts `both` only for `add_term`.** For passages, use `en` or `pt`.
-- **`verify_claims` requires Zotero + Cerebellum reachable.** Returns empty sources lists (not an error) when they are unavailable; `ghost_stat` still works offline.
+- **`verify_claims` is self-contained.** It checks for citation markers in the text — no external knowledge bases required.
 - **Seed scripts must be run manually** to populate rubrics and templates collections: `python scripts/seed_rubrics.py` and `python scripts/seed_templates.py`.

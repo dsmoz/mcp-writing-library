@@ -26,6 +26,8 @@ from pathlib import Path
 
 import structlog
 
+from src.sentry import capture_tool_error
+
 logger = structlog.get_logger(__name__)
 
 VECTOR_SIZE = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))  # text-embedding-3-small (OpenAI)
@@ -91,6 +93,7 @@ def setup_user_collections(user_id: str = "default") -> dict:
         except Exception as e:
             results[key] = {"collection": collection_name, "status": "error", "error": str(e)}
             logger.error("User collection setup failed", collection=collection_name, error=str(e))
+            capture_tool_error(e, tool_name="setup_user_collections", collection=collection_name)
 
     return results
 
@@ -118,6 +121,7 @@ def setup_collections(user_id: str = "default") -> dict:
         except Exception as e:
             results[key] = {"collection": collection_name, "status": "error", "error": str(e)}
             logger.error("Collection setup failed", collection=collection_name, error=str(e))
+            capture_tool_error(e, tool_name="setup_collections", collection=collection_name)
 
     return results
 

@@ -9,6 +9,8 @@ import statistics
 from typing import List, Optional
 import structlog
 
+from src.sentry import capture_tool_error
+
 logger = structlog.get_logger(__name__)
 
 try:

@@ -862,20 +862,16 @@ def export_library(collection: str, ctx: Context, output_format: str = "json") -
 def verify_claims(
     text: str,
     domain: str = "general",
-    top_k_per_claim: int = 3,
-    corroboration_threshold: float = 0.65,
-    research_paths: list = None,
 ) -> dict:
     """
-    Detect potential hallucinations by verifying claim-bearing sentences against
-    local research files, Zotero, and Cerebellum knowledge bases.
+    Detect potential hallucinations by checking claim-bearing sentences for
+    explicit citation markers. Flags ghost stats (numbers without any source).
 
-    Search order per claim: local research files (if provided) → Zotero → Cerebellum.
-    A strong local match short-circuits remote searches for that claim.
+    Fully self-contained — no external knowledge-base dependencies.
 
     Extracts sentences that contain statistics, causal assertions, epistemic
-    verbs, citation placeholders, or country/prevalence keywords, then searches
-    sources for corroborating evidence.
+    verbs, citation placeholders, or country/prevalence keywords, then checks
+    each for APA or numeric citation markers.
 
     Claim patterns detected:
         - Numbers and percentages (e.g. "12.5%", "45 percent")
@@ -884,39 +880,27 @@ def verify_claims(
         - Country/prevalence terms (in Mozambique, HIV prevalence, PLHIV…)
 
     Verdict thresholds:
-        evidenced          — ≥80% of claims corroborated
-        mixed              — 40–80% of claims corroborated
-        unverified         — <40% of claims corroborated
+        evidenced          — ≥80% of claims have citations
+        mixed              — 40–80% of claims have citations
+        unverified         — <40% of claims have citations
         no_claims_detected — no claim-bearing sentences found; overall_evidence_score
                              is None and no verification was performed
 
-    Ghost stats are unverified claim sentences that contain a number or
-    percentage with no supporting source — high-risk hallucination candidates.
+    Ghost stats are uncited claim sentences that contain a number or
+    percentage — high-risk hallucination candidates.
 
     Args:
         text: The passage or document section to analyse
         domain: Thematic domain for domain-specific claim pattern augmentation.
                 Valid values: "general", "finance", "governance", "climate",
                 "m-and-e", "org", "health". Unknown values fall back to general patterns.
-        top_k_per_claim: Sources to retrieve per claim sentence (default 3, max 10)
-        corroboration_threshold: Minimum score to mark a claim as verified (default 0.65)
-        research_paths: Optional list of file paths or directory paths to local
-                        research documents (.md, .txt, .pdf). Read at call time;
-                        never indexed into Qdrant. Searched first before Zotero/Cerebellum.
 
     Returns:
         overall_evidence_score (0–1 or None), verdict (evidenced|mixed|unverified|no_claims_detected),
-        total_claims, verified_count, and per-claim results with source attribution
-        and ghost_stat flag. Degrades gracefully if Zotero or Cerebellum is unavailable.
+        total_claims, verified_count, and per-claim results with ghost_stat flag.
     """
     from src.tools.evidence import verify_claims as _verify
-    return _verify(
-        text=text,
-        domain=domain,
-        top_k_per_claim=top_k_per_claim,
-        corroboration_threshold=corroboration_threshold,
-        research_paths=research_paths,
-    )
+    return _verify(text=text, domain=domain)
 
 
 @mcp.tool()
@@ -960,6 +944,7 @@ def score_evidence_density(text: str, domain: str = "general") -> dict:
 
 @mcp.tool()
 def add_rubric_criterion(
+    ctx: Context,
     framework: str,
     section: str,
     criterion: str,
@@ -967,11 +952,13 @@ def add_rubric_criterion(
     red_flags: Optional[List[str]] = None,
 ) -> dict:
     """
-    Store an evaluation criterion in the rubric library.
+    Store an evaluation criterion in the rubric library (admin only).
 
     Use this to build up evaluation criteria for any framework — donor proposals
     (usaid, undp, global-fund), client deliverables (lambda, oca-2025), or
     internal standards (ds-moz-editorial). Score later with score_against_rubric().
+
+    Non-admin users should use contribute_rubric() to submit criteria for review.
 
     Args:
         framework: Evaluation framework slug — any lowercase slug (e.g. "usaid", "undp", "lambda", "oca-2025")
@@ -984,6 +971,9 @@ def add_rubric_criterion(
         {success, document_id, chunks_created, collection} on success,
         or {success: False, error} on empty framework or empty criterion
     """
+    err = _require_admin(ctx)
+    if err:
+        return {"success": False, "error": err}
     from src.tools.rubrics import add_rubric_criterion as _add
     return _add(framework=framework, section=section, criterion=criterion, weight=weight, red_flags=red_flags)
 
@@ -1037,16 +1027,19 @@ def list_rubric_frameworks() -> dict:
 
 @mcp.tool()
 def add_template(
+    ctx: Context,
     framework: str,
     doc_type: str,
     sections: List[dict],
 ) -> dict:
     """
-    Store a document template (list of required sections) for a framework and document type.
+    Store a document template (list of required sections) for a framework and document type (admin only).
 
     Use this to define the expected structure of documents for any framework — donor proposals
     (usaid, undp), client deliverables (lambda, oca-2025), or internal standards. Once stored,
     use check_structure() to verify a draft covers all required sections.
+
+    Non-admin users should use contribute_template() to submit templates for review.
 
     Args:
         framework: Evaluation framework slug — any lowercase slug (e.g. "undp", "lambda", "ds-moz")
@@ -1061,6 +1054,9 @@ def add_template(
         {success, document_id, chunks_created, framework, doc_type, section_count} on success,
         or {success: False, error} on invalid input
     """
+    err = _require_admin(ctx)
+    if err:
+        return {"success": False, "error": err}
     from src.tools.templates import add_template as _add
     return _add(framework=framework, doc_type=doc_type, sections=sections)
 
@@ -1384,6 +1380,7 @@ def suggest_alternatives(
 
 @mcp.tool()
 def add_thesaurus_entry(
+    ctx: Context,
     headword: str,
     language: str = "en",
     domain: str = "general",
@@ -1398,10 +1395,12 @@ def add_thesaurus_entry(
     source: str = "manual",
 ) -> dict:
     """
-    Add a new AI-pattern word to the vocabulary thesaurus.
+    Add a new AI-pattern word to the vocabulary thesaurus (admin only).
 
     Use this when you encounter a word that is overused or sounds AI-generated
     and you want to document it with its alternatives for future reference.
+
+    Non-admin users should use contribute_thesaurus_entry() to submit entries for review.
 
     Args:
         headword: The word to flag (e.g. "leverage")
@@ -1420,6 +1419,9 @@ def add_thesaurus_entry(
     Returns:
         document_id on success; error if duplicate or invalid input
     """
+    err = _require_admin(ctx)
+    if err:
+        return {"success": False, "error": err}
     from src.tools.thesaurus import add_thesaurus_entry as _add
     return _add(headword=headword, language=language, domain=domain,
                 definition=definition, part_of_speech=part_of_speech,

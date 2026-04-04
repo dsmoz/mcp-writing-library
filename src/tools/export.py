@@ -5,6 +5,7 @@ import csv
 import io
 import structlog
 
+from src.sentry import capture_tool_error
 from src.tools.collections import get_collection_names
 
 logger = structlog.get_logger(__name__)
@@ -16,13 +17,14 @@ except ImportError:
 
 
 def _resolve_collection(collection: str, user_id: str = "default") -> str | None:
-    """Return the Qdrant collection name for a logical alias or literal name."""
+    """Return the Qdrant collection name for a known logical alias only.
+
+    Raw Qdrant collection names are not accepted — callers must use aliases
+    like 'passages', 'terms', 'rubrics', etc.
+    """
     names = get_collection_names(user_id)
     if collection in names:
         return names[collection]
-    # Accept the literal Qdrant collection name too
-    if collection in names.values():
-        return collection
     return None
 
 
@@ -33,8 +35,7 @@ def export_library(collection: str, output_format: str = "json", user_id: str = 
     Scrolls the entire collection in batches and returns payloads as JSON or CSV.
 
     Args:
-        collection: Logical alias ("passages", "terms", "style_profiles", "rubrics") or
-                    the literal Qdrant collection name.
+        collection: Logical alias ("passages", "terms", "style_profiles", "rubrics", etc.).
         output_format: Output format — "json" (default) or "csv".
 
     Returns:
@@ -50,9 +51,8 @@ def export_library(collection: str, output_format: str = "json", user_id: str = 
         return {
             "success": False,
             "error": (
-                f"Unknown collection '{collection}'. "
-                f"Valid aliases: {sorted(names.keys())}. "
-                f"Valid Qdrant names: {sorted(names.values())}."
+                f"Unknown collection alias '{collection}'. "
+                f"Valid aliases: {sorted(names.keys())}."
             ),
         }
 
@@ -137,4 +137,5 @@ def export_library(collection: str, output_format: str = "json", user_id: str = 
 
     except Exception as e:
         logger.error("export_library failed", collection=collection_name, error=str(e))
+        capture_tool_error(e, tool_name="export_library", collection=collection_name)
         return {"success": False, "error": str(e)}

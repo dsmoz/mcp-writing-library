@@ -5,6 +5,7 @@ from typing import Optional
 from uuid import uuid4
 import structlog
 
+from src.sentry import capture_tool_error
 from src.tools.collections import get_collection_names
 from src.tools.registry import VALID_DOMAINS, VALID_LANGUAGES_TERMS as VALID_LANGUAGES
 
@@ -88,6 +89,7 @@ def add_term(
         }
     except Exception as e:
         logger.error("Failed to add term", error=str(e))
+        capture_tool_error(e, tool_name="add_term", user_id=user_id)
         return {"success": False, "error": str(e)}
 
 
@@ -180,6 +182,7 @@ def delete_term(document_id: str, user_id: str = "default") -> dict:
         return {"success": True, "document_id": document_id, "deleted": True}
     except Exception as e:
         logger.error("Failed to delete term", error=str(e), document_id=document_id)
+        capture_tool_error(e, tool_name="delete_term", document_id=document_id)
         return {"success": False, "error": str(e)}
 
 
@@ -336,6 +339,7 @@ def update_term(
                 error=str(index_error),
                 document_id=document_id,
             )
+            capture_tool_error(index_error, tool_name="update_term", phase="re-index", document_id=document_id)
             return {
                 "success": False,
                 "error": f"Re-index failed after deletion: {index_error}. Original payload preserved for recovery.",
@@ -352,4 +356,5 @@ def update_term(
 
     except Exception as e:
         logger.error("Failed to update term", error=str(e), document_id=document_id)
+        capture_tool_error(e, tool_name="update_term", document_id=document_id)
         return {"success": False, "error": str(e)}

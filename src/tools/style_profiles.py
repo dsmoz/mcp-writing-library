@@ -9,6 +9,7 @@ from typing import Optional
 from uuid import uuid4
 import structlog
 
+from src.sentry import capture_tool_error
 from src.tools.styles import VALID_STYLES
 from src.tools.registry import VALID_CHANNELS
 
@@ -149,6 +150,7 @@ def save_style_profile(
         }
     except Exception as e:
         logger.error("Failed to save style profile", name=name, error=str(e))
+        capture_tool_error(e, tool_name="save_style_profile", name=name, user_id=user_id)
         return {"success": False, "error": str(e)}
 
 
@@ -186,6 +188,7 @@ def load_style_profile(name: str, user_id: str = "default") -> dict:
         return {"success": True, "profile": payload}
     except Exception as e:
         logger.error("Failed to load style profile", name=name, error=str(e))
+        capture_tool_error(e, tool_name="load_style_profile", name=name)
         return {"success": False, "error": str(e)}
 
 
@@ -508,6 +511,7 @@ def harvest_corrections_to_profile(
 
     except Exception as e:
         logger.error("harvest_corrections_to_profile failed", error=str(e))
+        capture_tool_error(e, tool_name="harvest_corrections_to_profile", profile_name=profile_name)
         return {"success": False, "error": str(e)}
 
 
@@ -552,6 +556,7 @@ def search_style_profiles(
         return {"success": True, "results": results, "total": len(results)}
     except Exception as e:
         logger.error("Style profile search failed", error=str(e))
+        capture_tool_error(e, tool_name="search_style_profiles", user_id=user_id)
         return {"success": False, "error": str(e), "results": []}
 
 
@@ -607,4 +612,5 @@ def list_style_profiles(
         return {"success": True, "profiles": profiles, "total": len(profiles)}
     except Exception as e:
         logger.error("list_style_profiles failed", error=str(e))
+        capture_tool_error(e, tool_name="list_style_profiles", user_id=user_id)
         return {"success": False, "error": str(e), "profiles": []}

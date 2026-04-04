@@ -24,6 +24,8 @@ from typing import List, Optional, Tuple
 
 import structlog
 
+from src.sentry import capture_tool_error
+
 logger = structlog.get_logger(__name__)
 
 try:
@@ -625,6 +627,7 @@ def score_ai_patterns(
 
     except Exception as e:
         logger.error("score_ai_patterns failed", error=str(e))
+        capture_tool_error(e, tool_name="score_ai_patterns", doc_type=doc_type)
         return {"success": False, "error": str(e)}
 
 
@@ -747,4 +750,5 @@ def score_semantic_ai_likelihood(
 
     except Exception as e:
         logger.error("score_semantic_ai_likelihood failed", error=str(e))
+        capture_tool_error(e, tool_name="score_semantic_ai_likelihood")
         return {"success": False, "error": str(e)}

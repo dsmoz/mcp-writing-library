@@ -8,6 +8,7 @@ from typing import List, Optional
 
 import structlog
 
+from src.sentry import capture_tool_error
 from src.tools.collections import get_collection_names
 
 logger = structlog.get_logger(__name__)
@@ -164,6 +165,7 @@ def check_internal_similarity(
 
     except Exception as e:
         logger.error("Internal similarity check failed", error=str(e))
+        capture_tool_error(e, tool_name="check_internal_similarity", user_id=user_id)
         return {"success": False, "error": str(e)}
 
 
@@ -259,9 +261,11 @@ def check_external_similarity(
 
     except _requests.RequestException as e:
         logger.error("Tavily API request failed", error=str(e))
+        capture_tool_error(e, tool_name="check_external_similarity", phase="tavily_request")
         return {"success": False, "error": f"Tavily API request failed: {e}"}
     except Exception as e:
         logger.error("External similarity check failed", error=str(e))
+        capture_tool_error(e, tool_name="check_external_similarity")
         return {"success": False, "error": str(e)}
 
 
@@ -337,6 +341,7 @@ def score_external_similarity(
 
     except Exception as e:
         logger.error("score_external_similarity failed", error=str(e))
+        capture_tool_error(e, tool_name="score_external_similarity")
         return {"success": False, "error": str(e)}
 
 

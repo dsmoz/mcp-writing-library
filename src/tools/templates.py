@@ -5,6 +5,7 @@ from typing import List
 from uuid import uuid4
 import structlog
 
+from src.sentry import capture_tool_error
 from src.tools.collections import get_collection_names
 from src.tools.registry import VALID_DOC_TYPES
 
@@ -151,6 +152,7 @@ def add_template(framework: str, doc_type: str, sections: list) -> dict:
         }
     except Exception as e:
         logger.error("Failed to add template", error=str(e))
+        capture_tool_error(e, tool_name="add_template", framework=framework, doc_type=doc_type)
         return {"success": False, "error": str(e)}
 
 
@@ -198,6 +200,7 @@ def check_structure(text: str, framework: str, doc_type: str) -> dict:
         )
     except Exception as e:
         logger.error("check_structure search failed", error=str(e))
+        capture_tool_error(e, tool_name="check_structure", framework=framework, doc_type=doc_type)
         return {"success": False, "error": str(e)}
 
     if not raw_results:
@@ -384,4 +387,5 @@ def list_templates() -> dict:
 
     except Exception as e:
         logger.error("list_templates failed", error=str(e))
+        capture_tool_error(e, tool_name="list_templates")
         return {"success": False, "error": str(e)}

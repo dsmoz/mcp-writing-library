@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import structlog
 
+from src.sentry import capture_tool_error
 from src.tools.collections import get_collection_names
 from src.tools.registry import VALID_DOMAINS, VALID_LANGUAGES
 
@@ -134,6 +135,7 @@ def add_thesaurus_entry(
         return {"success": True, "document_id": document_id, "chunks_created": len(point_ids), "collection": collection}
     except Exception as e:
         logger.error("Failed to add thesaurus entry", error=str(e))
+        capture_tool_error(e, tool_name="add_thesaurus_entry", headword=headword)
         return {"success": False, "error": str(e)}
 
 
@@ -183,6 +185,7 @@ def search_thesaurus(
         return {"success": True, "results": results, "total": len(results)}
     except Exception as e:
         logger.error("Thesaurus search failed", error=str(e))
+        capture_tool_error(e, tool_name="search_thesaurus")
         return {"success": False, "error": str(e), "results": []}
 
 

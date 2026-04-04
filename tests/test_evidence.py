@@ -1,5 +1,4 @@
 """Tests for evidence hallucination detection tools."""
-from unittest.mock import patch
 
 
 # ---------------------------------------------------------------------------
@@ -54,98 +53,65 @@ def test_split_sentences_filters_short():
 
 
 # ---------------------------------------------------------------------------
-# verify_claims — verified result when Zotero returns high score
+# verify_claims — cited claim is marked as cited
 # ---------------------------------------------------------------------------
 
-def test_verify_claims_verified_when_zotero_high_score():
-    high_score_source = [{
-        "title": "HIV in Mozambique 2023",
-        "citekey": "silva-HIV-2023",
-        "score": 0.85,
-        "source_type": "zotero",
-        "excerpt": "HIV prevalence reached 12.5% among adults.",
-    }]
-
-    with patch("src.tools.evidence._search_zotero", return_value=high_score_source), \
-         patch("src.tools.evidence._search_cerebellum", return_value=[]):
-        from src.tools.evidence import verify_claims
-        result = verify_claims(
-            "HIV prevalence reached 12.5% among adults in Mozambique in 2023."
-        )
-
+def test_verify_claims_cited_with_apa_citation():
+    from src.tools.evidence import verify_claims
+    # Use single-author citation to avoid sentence splitting at "et al."
+    result = verify_claims(
+        "HIV prevalence reached 12.5% among adults in Mozambique (Silva 2023)."
+    )
     assert result["success"] is True
     assert result["total_claims"] >= 1
     assert result["verified_count"] >= 1
     claim = result["claims"][0]
-    assert claim["verdict"] == "verified"
+    assert claim["verdict"] == "cited"
     assert claim["ghost_stat"] is False
-    assert any(s["source_type"] == "zotero" for s in claim["sources"])
+
+
+def test_verify_claims_cited_with_numeric_citation():
+    from src.tools.evidence import verify_claims
+    result = verify_claims(
+        "Maternal mortality declined by 30% over the decade [1]."
+    )
+    assert result["success"] is True
+    assert result["verified_count"] >= 1
+    assert result["claims"][0]["verdict"] == "cited"
 
 
 # ---------------------------------------------------------------------------
-# verify_claims — unverified + ghost_stat=True when number present but no match
+# verify_claims — uncited + ghost_stat=True when number present but no citation
 # ---------------------------------------------------------------------------
 
-def test_verify_claims_ghost_stat_when_number_unverified():
-    with patch("src.tools.evidence._search_zotero", return_value=[]), \
-         patch("src.tools.evidence._search_cerebellum", return_value=[]):
-        from src.tools.evidence import verify_claims
-        result = verify_claims(
-            "Maternal mortality is 45% higher in rural districts with limited access."
-        )
-
+def test_verify_claims_ghost_stat_when_number_uncited():
+    from src.tools.evidence import verify_claims
+    result = verify_claims(
+        "Maternal mortality is 45% higher in rural districts with limited access."
+    )
     assert result["success"] is True
     assert result["total_claims"] >= 1
-    unverified_claims = [c for c in result["claims"] if c["verdict"] == "unverified"]
-    assert len(unverified_claims) >= 1
-    ghost_stats = [c for c in unverified_claims if c["ghost_stat"]]
+    uncited_claims = [c for c in result["claims"] if c["verdict"] == "uncited"]
+    assert len(uncited_claims) >= 1
+    ghost_stats = [c for c in uncited_claims if c["ghost_stat"]]
     assert len(ghost_stats) >= 1
 
 
 # ---------------------------------------------------------------------------
-# verify_claims — graceful fallback when Zotero import fails
+# verify_claims — uncited claim without number has ghost_stat=False
 # ---------------------------------------------------------------------------
 
-def test_verify_claims_graceful_when_zotero_fails():
-    low_score_source = [{
-        "title": "Some cerebellum doc",
-        "citekey": None,
-        "score": 0.3,
-        "source_type": "cerebellum",
-        "excerpt": "Some text snippet.",
-    }]
-
-    with patch("src.tools.evidence._search_zotero", return_value=[]), \
-         patch("src.tools.evidence._search_cerebellum", return_value=low_score_source):
-        from src.tools.evidence import verify_claims
-        result = verify_claims(
-            "HIV prevalence reached 12.5% among adults in Mozambique in 2023."
-        )
-
-    assert result["success"] is True
-    assert result["total_claims"] >= 1
-    # With only a low-score cerebellum source, the claim should be unverified
-    claim = result["claims"][0]
-    assert claim["verdict"] == "unverified"
-
-
-# ---------------------------------------------------------------------------
-# verify_claims — graceful fallback when both sources fail
-# ---------------------------------------------------------------------------
-
-def test_verify_claims_graceful_when_both_sources_fail():
-    with patch("src.tools.evidence._search_zotero", return_value=[]), \
-         patch("src.tools.evidence._search_cerebellum", return_value=[]):
-        from src.tools.evidence import verify_claims
-        result = verify_claims(
-            "Research shows that adolescent girls in Mozambique face high dropout rates."
-        )
-
+def test_verify_claims_uncited_without_number_no_ghost_stat():
+    from src.tools.evidence import verify_claims
+    result = verify_claims(
+        "Research shows that adolescent girls in Mozambique face high dropout rates."
+    )
     assert result["success"] is True
     assert result["total_claims"] >= 1
     for claim in result["claims"]:
-        assert claim["verdict"] == "unverified"
-        assert claim["sources"] == []
+        assert claim["verdict"] == "uncited"
+        # No number in the sentence, so ghost_stat should be False
+        assert claim["ghost_stat"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -184,31 +150,42 @@ def test_verify_claims_empty_text():
 # ---------------------------------------------------------------------------
 
 def test_verify_claims_verdict_mixed():
-    """50% verified → mixed verdict."""
-    call_count = {"n": 0}
-
-    def zotero_side_effect(query, top_k):
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            # First claim: high score → verified
-            return [{"title": "Doc A", "citekey": "a-2023", "score": 0.9,
-                     "source_type": "zotero", "excerpt": "excerpt A"}]
-        # Second claim: no results → unverified
-        return []
-
-    with patch("src.tools.evidence._search_zotero", side_effect=zotero_side_effect), \
-         patch("src.tools.evidence._search_cerebellum", return_value=[]):
-        from src.tools.evidence import verify_claims
-        result = verify_claims(
-            "HIV prevalence reached 12.5% in the region. "
-            "Maternal mortality is 45% higher in rural districts with limited access."
-        )
+    """One cited + one uncited claim → 50% → mixed verdict."""
+    from src.tools.evidence import verify_claims
+    result = verify_claims(
+        "HIV prevalence reached 12.5% in the region (Silva 2023). "
+        "Maternal mortality is 45% higher in rural districts with limited access."
+    )
 
     assert result["success"] is True
     assert result["total_claims"] == 2
     assert result["verified_count"] == 1
     assert result["overall_evidence_score"] == 0.5
     assert result["verdict"] == "mixed"
+
+
+def test_verify_claims_verdict_evidenced():
+    """All claims cited → evidenced verdict."""
+    from src.tools.evidence import verify_claims
+    result = verify_claims(
+        "HIV prevalence reached 12.5% in the region (Silva 2023). "
+        "Maternal mortality declined by 30% over the decade [1]."
+    )
+    assert result["success"] is True
+    assert result["verdict"] == "evidenced"
+    assert result["overall_evidence_score"] >= 0.8
+
+
+def test_verify_claims_verdict_unverified():
+    """No claims cited → unverified verdict."""
+    from src.tools.evidence import verify_claims
+    result = verify_claims(
+        "HIV prevalence reached 12.5% in the region. "
+        "Maternal mortality is 45% higher in rural districts."
+    )
+    assert result["success"] is True
+    assert result["verdict"] == "unverified"
+    assert result["overall_evidence_score"] < 0.4
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +287,7 @@ def test_is_claim_sentence_portuguese_prevalence():
 
 
 # ---------------------------------------------------------------------------
-# ghost_stat for bare large numbers (Issue 3)
+# ghost_stat for bare large numbers
 # ---------------------------------------------------------------------------
 
 def test_has_number_matches_bare_large_numbers():
@@ -332,19 +309,16 @@ def test_has_number_does_not_flag_single_digits():
 
 
 def test_ghost_stat_flagged_for_bare_number():
-    """Unverified claim with a bare large number should set ghost_stat=True."""
-    from unittest.mock import patch
-    with patch("src.tools.evidence._search_zotero", return_value=[]), \
-         patch("src.tools.evidence._search_cerebellum", return_value=[]):
-        from src.tools.evidence import verify_claims
-        result = verify_claims(
-            "The programme reached 35000 beneficiaries in the northern provinces."
-        )
+    """Uncited claim with a bare large number should set ghost_stat=True."""
+    from src.tools.evidence import verify_claims
+    result = verify_claims(
+        "The programme reached 35000 beneficiaries in the northern provinces."
+    )
 
     assert result["success"] is True
-    unverified = [c for c in result["claims"] if c["verdict"] == "unverified"]
-    assert len(unverified) >= 1
-    assert any(c["ghost_stat"] for c in unverified)
+    uncited = [c for c in result["claims"] if c["verdict"] == "uncited"]
+    assert len(uncited) >= 1
+    assert any(c["ghost_stat"] for c in uncited)
 
 
 # ---------------------------------------------------------------------------
@@ -353,28 +327,22 @@ def test_ghost_stat_flagged_for_bare_number():
 
 def test_domain_health_detects_hiv_prevalence_sentence():
     """With domain='health', 'HIV prevalence' sentence is still detected as a claim."""
-    with patch("src.tools.evidence._search_zotero", return_value=[]), \
-         patch("src.tools.evidence._search_cerebellum", return_value=[]):
-        from src.tools.evidence import verify_claims
-        result = verify_claims(
-            "HIV prevalence among adolescent girls has remained persistently high.",
-            domain="health",
-        )
-
+    from src.tools.evidence import verify_claims
+    result = verify_claims(
+        "HIV prevalence among adolescent girls has remained persistently high.",
+        domain="health",
+    )
     assert result["success"] is True
     assert result["total_claims"] >= 1
 
 
 def test_domain_finance_detects_budget_sentence():
     """With domain='finance', 'budget allocation of USD 2 million' is detected as a claim."""
-    with patch("src.tools.evidence._search_zotero", return_value=[]), \
-         patch("src.tools.evidence._search_cerebellum", return_value=[]):
-        from src.tools.evidence import verify_claims
-        result = verify_claims(
-            "The budget allocation of USD 2 million was approved for the next fiscal year.",
-            domain="finance",
-        )
-
+    from src.tools.evidence import verify_claims
+    result = verify_claims(
+        "The budget allocation of USD 2 million was approved for the next fiscal year.",
+        domain="finance",
+    )
     assert result["success"] is True
     assert result["total_claims"] >= 1
 
@@ -398,23 +366,21 @@ def test_domain_m_and_e_detects_indicator_sentence_no_number():
 
 def test_verify_claims_returns_domain_key():
     """Return dict from verify_claims() must include a 'domain' key."""
-    with patch("src.tools.evidence._search_zotero", return_value=[]), \
-         patch("src.tools.evidence._search_cerebellum", return_value=[]):
-        from src.tools.evidence import verify_claims
+    from src.tools.evidence import verify_claims
 
-        result_with_claims = verify_claims(
-            "HIV prevalence reached 12.5% in the region.",
-            domain="health",
-        )
-        assert "domain" in result_with_claims
-        assert result_with_claims["domain"] == "health"
+    result_with_claims = verify_claims(
+        "HIV prevalence reached 12.5% in the region.",
+        domain="health",
+    )
+    assert "domain" in result_with_claims
+    assert result_with_claims["domain"] == "health"
 
-        result_no_claims = verify_claims(
-            "The programme was implemented by a dedicated team.",
-            domain="governance",
-        )
-        assert "domain" in result_no_claims
-        assert result_no_claims["domain"] == "governance"
+    result_no_claims = verify_claims(
+        "The programme was implemented by a dedicated team.",
+        domain="governance",
+    )
+    assert "domain" in result_no_claims
+    assert result_no_claims["domain"] == "governance"
 
 
 def test_domain_unknown_falls_back_to_general_patterns():
@@ -422,96 +388,3 @@ def test_domain_unknown_falls_back_to_general_patterns():
     from src.tools.evidence import _get_claim_patterns, _ALL_CLAIM_PATTERNS
     patterns = _get_claim_patterns("unknown-domain")
     assert patterns == _ALL_CLAIM_PATTERNS
-
-
-# ---------------------------------------------------------------------------
-# research_paths — local file search helpers
-# ---------------------------------------------------------------------------
-
-def test_read_research_files_reads_txt(tmp_path):
-    """_read_research_files reads a .txt file and returns chunks."""
-    from src.tools.evidence import _read_research_files
-    txt_file = tmp_path / "research.txt"
-    txt_file.write_text("HIV prevalence in Mozambique reached 12.5% in 2023 according to national surveys.")
-    chunks = _read_research_files([str(txt_file)])
-    assert len(chunks) >= 1
-    assert chunks[0]["source_file"] == str(txt_file)
-    assert "HIV" in chunks[0]["text"]
-
-
-def test_read_research_files_reads_directory(tmp_path):
-    """_read_research_files scans a directory for supported files."""
-    from src.tools.evidence import _read_research_files
-    (tmp_path / "a.txt").write_text("Maternal mortality declined by 30% according to WHO data from 2022.")
-    (tmp_path / "b.md").write_text("Research shows that community-led interventions are effective in SADC.")
-    (tmp_path / "skip.csv").write_text("should,not,be,read")
-    chunks = _read_research_files([str(tmp_path)])
-    source_files = {c["source_file"] for c in chunks}
-    assert any("a.txt" in f for f in source_files)
-    assert any("b.md" in f for f in source_files)
-    assert all("skip.csv" not in f for f in source_files)
-
-
-def test_read_research_files_skips_missing_path():
-    """_read_research_files silently skips non-existent paths."""
-    from src.tools.evidence import _read_research_files
-    chunks = _read_research_files(["/nonexistent/path/file.txt"])
-    assert chunks == []
-
-
-def test_search_local_files_returns_scored_results(tmp_path):
-    """_search_local_files scores chunks by keyword overlap."""
-    from src.tools.evidence import _search_local_files
-    chunks = [
-        {"text": "HIV prevalence in Mozambique reached 12.5% in 2023.", "source_file": "report.md"},
-        {"text": "The programme was delivered by dedicated staff members.", "source_file": "report.md"},
-    ]
-    results = _search_local_files("HIV prevalence Mozambique", chunks, top_k=5)
-    assert len(results) >= 1
-    assert results[0]["score"] > 0
-    assert results[0]["source_type"] == "local"
-    assert "source_file" in results[0]
-    # First result should be the HIV-related chunk, not the staff one
-    assert "HIV" in results[0]["excerpt"]
-
-
-def test_verify_claims_uses_local_files_first(tmp_path):
-    """When research_paths is provided, local match short-circuits remote search."""
-    from src.tools.evidence import verify_claims
-    # Write a file with corroborating evidence for the claim
-    research_file = tmp_path / "evidence.md"
-    research_file.write_text(
-        "HIV prevalence among adults in Mozambique reached 12.5 percent according "
-        "to the national health survey conducted in 2023 by MISAU and partners."
-    )
-
-    # Mock remote sources to track whether they were called
-    with patch("src.tools.evidence._search_zotero") as mock_zotero, \
-         patch("src.tools.evidence._search_cerebellum") as mock_cerebellum:
-        # Keyword overlap alone will not reach 0.65; allow remote to be called — we
-        # just verify that local sources appear in the result
-        mock_zotero.return_value = []
-        mock_cerebellum.return_value = []
-
-        result = verify_claims(
-            "HIV prevalence reached 12.5% among adults in Mozambique in 2023.",
-            research_paths=[str(research_file)],
-        )
-
-    assert result["success"] is True
-    assert result["total_claims"] >= 1
-    # Local source should appear in sources for the claim
-    all_source_types = [s["source_type"] for claim in result["claims"] for s in claim["sources"]]
-    assert "local" in all_source_types
-
-
-def test_verify_claims_without_research_paths_unchanged():
-    """Omitting research_paths preserves existing behaviour."""
-    with patch("src.tools.evidence._search_zotero", return_value=[]), \
-         patch("src.tools.evidence._search_cerebellum", return_value=[]):
-        from src.tools.evidence import verify_claims
-        result = verify_claims(
-            "HIV prevalence reached 12.5% among adults in Mozambique.",
-        )
-    assert result["success"] is True
-    assert result["total_claims"] >= 1

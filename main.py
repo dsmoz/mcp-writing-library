@@ -35,6 +35,17 @@ else:
     load_dotenv(project_root / '.env.example')
     print(f"⚠️  {env_file} not found, using .env.example", file=sys.stderr)
 
+# Initialise Sentry (no-op if SENTRY_DSN is not set)
+_sentry_dsn = os.getenv("SENTRY_DSN")
+if _sentry_dsn:
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        traces_sample_rate=0.1,
+        environment=os.getenv("RAILWAY_ENVIRONMENT", "development"),
+    )
+    print("✅ Sentry error tracking enabled", file=sys.stderr)
+
 
 def main():
     """Main entry point for MCP server."""

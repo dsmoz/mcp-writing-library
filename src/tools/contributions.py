@@ -29,6 +29,8 @@ from uuid import uuid4
 
 import structlog
 
+from src.sentry import capture_tool_error
+
 logger = structlog.get_logger(__name__)
 
 VALID_TARGETS = ("terms", "thesaurus", "rubrics", "templates")
@@ -178,6 +180,7 @@ def contribute(
         }
     except Exception as e:
         logger.error("Failed to submit contribution", error=str(e))
+        capture_tool_error(e, tool_name="contribute", target=target, contributed_by=contributed_by)
         return {"success": False, "error": str(e)}
 
 
@@ -257,6 +260,7 @@ def list_contributions(
 
     except Exception as e:
         logger.error("list_contributions failed", error=str(e))
+        capture_tool_error(e, tool_name="list_contributions")
         return {"success": False, "error": str(e), "contributions": []}
 
 
@@ -354,6 +358,7 @@ def review_contribution(
 
     except Exception as e:
         logger.error("review_contribution failed", error=str(e))
+        capture_tool_error(e, tool_name="review_contribution", contribution_id=contribution_id)
         return {"success": False, "error": str(e)}
 
 
@@ -391,6 +396,7 @@ def _publish_to_shared(target: str, payload: dict, source_contribution_id: str) 
         logger.info("Contribution published to shared collection", target=target, collection=collection_name)
     except Exception as e:
         logger.error("Failed to publish contribution to shared collection", error=str(e))
+        capture_tool_error(e, tool_name="_publish_to_shared", target=target, contribution_id=source_contribution_id)
         raise
 
 

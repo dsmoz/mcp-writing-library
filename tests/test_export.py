@@ -84,11 +84,9 @@ def test_export_library_json_style_profiles():
     assert result["collection"] == "writing_style_profiles"
 
 
-def test_export_library_accepts_literal_collection_name():
-    payloads = [{"text": "A passage."}]
-    mock_client = _make_scroll_client([payloads])
-
-    with patch("src.tools.export.get_qdrant_client", return_value=mock_client), \
+def test_export_library_rejects_literal_collection_name():
+    """Literal Qdrant collection names are not accepted — only aliases."""
+    with patch("src.tools.export.get_qdrant_client", return_value=MagicMock()), \
          patch("src.tools.export.get_collection_names", return_value={
              "passages": "writing_passages",
              "terms": "writing_terms",
@@ -97,8 +95,8 @@ def test_export_library_accepts_literal_collection_name():
         from src.tools.export import export_library
         result = export_library(collection="writing_passages", output_format="json")
 
-    assert result["success"] is True
-    assert result["collection"] == "writing_passages"
+    assert result["success"] is False
+    assert "Valid aliases" in result["error"]
 
 
 def test_export_library_paginates_multiple_pages():
