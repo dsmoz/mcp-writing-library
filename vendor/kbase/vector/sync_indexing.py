@@ -668,7 +668,7 @@ def ensure_collection(
 
         # Create payload indexes for filterable fields
         from qdrant_client.models import PayloadSchemaType
-        for field in ("language", "domain", "doc_type"):
+        for field in ("language", "domain", "doc_type", "name", "channel"):
             client.create_payload_index(
                 collection_name=collection_name,
                 field_name=field,
