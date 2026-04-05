@@ -634,7 +634,7 @@ def score_ai_patterns(
 def score_semantic_ai_likelihood(
     text: str,
     top_k: int = 10,
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """
     Score how semantically similar text is to known AI-corrected passages vs.
@@ -672,7 +672,7 @@ def score_semantic_ai_likelihood(
     except ImportError:
         return {"success": False, "error": "collections module not available"}
 
-    collection = get_collection_names(user_id)["passages"]
+    collection = get_collection_names(client_id)["passages"]
 
     def _mean_similarity(results: list) -> Optional[float]:
         scores = [r["score"] for r in results if "score" in r]

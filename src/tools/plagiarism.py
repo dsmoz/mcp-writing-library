@@ -102,7 +102,7 @@ def check_internal_similarity(
     threshold: float = _DEFAULT_INTERNAL_THRESHOLD,
     top_k_per_sentence: int = 3,
     verdict_threshold_pct: float = _DEFAULT_VERDICT_PCT,
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """
     Check if a passage is too similar to content already in the writing library.
@@ -113,7 +113,7 @@ def check_internal_similarity(
     if not text or not text.strip():
         return {"success": False, "error": "text cannot be empty"}
 
-    collection = get_collection_names(user_id)["passages"]
+    collection = get_collection_names(client_id)["passages"]
     sentences = _split_sentences(text)
 
     if not sentences:
@@ -165,7 +165,7 @@ def check_internal_similarity(
 
     except Exception as e:
         logger.error("Internal similarity check failed", error=str(e))
-        capture_tool_error(e, tool_name="check_internal_similarity", user_id=user_id)
+        capture_tool_error(e, tool_name="check_internal_similarity", client_id=client_id)
         return {"success": False, "error": str(e)}
 
 

@@ -39,7 +39,7 @@ def add_passage(
     source: str = "manual",
     style: Optional[List[str]] = None,
     rubric_section: Optional[str] = None,
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """Store an exemplary writing passage in the user's writing_passages collection."""
     if doc_type not in VALID_DOC_TYPES:
@@ -65,10 +65,11 @@ def add_passage(
         style = [s for s in style if s in VALID_STYLES]
 
     document_id = str(uuid4())
-    collection = get_collection_names(user_id)["passages"]
+    collection = get_collection_names(client_id)["passages"]
     title = f"[{doc_type.upper()} | {language.upper()}] {text[:60]}..."
 
     metadata = {
+        "client_id": client_id,
         "doc_type": doc_type,
         "language": language,
         "domain": domain,
@@ -99,7 +100,7 @@ def add_passage(
         }
     except Exception as e:
         logger.error("Failed to add passage", error=str(e))
-        capture_tool_error(e, tool_name="add_passage", user_id=user_id)
+        capture_tool_error(e, tool_name="add_passage", client_id=client_id)
         return {"success": False, "error": str(e)}
 
 
@@ -111,10 +112,10 @@ def search_passages(
     style: Optional[str] = None,
     rubric_section: Optional[str] = None,
     top_k: int = 5,
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """Search for exemplary writing passages by semantic similarity."""
-    collection = get_collection_names(user_id)["passages"]
+    collection = get_collection_names(client_id)["passages"]
 
     filter_conditions = {}
     if doc_type:
@@ -166,13 +167,13 @@ def search_passages(
         return {"success": True, "results": results, "total": len(results)}
     except Exception as e:
         logger.error("Passage search failed", error=str(e))
-        capture_tool_error(e, tool_name="search_passages", user_id=user_id)
+        capture_tool_error(e, tool_name="search_passages", client_id=client_id)
         return {"success": False, "error": str(e), "results": []}
 
 
-def delete_passage(document_id: str, user_id: str = "default") -> dict:
+def delete_passage(document_id: str, client_id: str = "default") -> dict:
     """Delete a passage from the user's writing_passages collection by document_id."""
-    collection = get_collection_names(user_id)["passages"]
+    collection = get_collection_names(client_id)["passages"]
     try:
         check_result = check_document_indexed(
             collection_name=collection,
@@ -192,7 +193,7 @@ def delete_passage(document_id: str, user_id: str = "default") -> dict:
         return {"success": False, "error": str(e)}
 
 
-def batch_add_passages(items: list, user_id: str = "default") -> dict:
+def batch_add_passages(items: list, client_id: str = "default") -> dict:
     """Add multiple writing passages in a single call. Never raises; collects per-item errors."""
     results = []
     succeeded = 0
@@ -218,7 +219,7 @@ def batch_add_passages(items: list, user_id: str = "default") -> dict:
             source=item.get("source", "manual"),
             style=item.get("style"),
             rubric_section=item.get("rubric_section"),
-            user_id=user_id,
+            client_id=client_id,
         )
         result["index"] = i
         results.append(result)
@@ -245,7 +246,7 @@ def record_correction(
     language: str = "en",
     domain: str = "general",
     source: str = "manual",
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """Store a before/after correction pair in the passages collection.
 
@@ -270,7 +271,7 @@ def record_correction(
 
     from uuid import uuid4
     correction_id = str(uuid4())
-    collection = get_collection_names(user_id)["passages"]
+    collection = get_collection_names(client_id)["passages"]
 
     results = {}
     for role, text, style_tag in [
@@ -280,6 +281,7 @@ def record_correction(
         document_id = str(uuid4())
         title = f"[CORRECTION:{role.upper()} | {doc_type.upper()} | {language.upper()}] {text[:60]}..."
         metadata = {
+            "client_id": client_id,
             "doc_type": doc_type,
             "language": language,
             "domain": domain,
@@ -308,7 +310,7 @@ def record_correction(
             }
         except Exception as e:
             logger.error("Failed to record correction", role=role, error=str(e))
-            capture_tool_error(e, tool_name="record_correction", role=role, user_id=user_id)
+            capture_tool_error(e, tool_name="record_correction", role=role, client_id=client_id)
             results[role] = {"success": False, "error": str(e)}
 
     overall_success = all(v.get("success") for v in results.values())
@@ -331,7 +333,7 @@ def update_passage(
     tags: Optional[List[str]] = None,
     source: Optional[str] = None,
     style: Optional[List[str]] = None,
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """Update a passage by deleting and re-indexing with merged metadata."""
     updated_fields = [
@@ -361,7 +363,7 @@ def update_passage(
             "error": f"Invalid domain '{domain}'. Must be one of: {sorted(VALID_DOMAINS)}",
         }
 
-    collection = get_collection_names(user_id)["passages"]
+    collection = get_collection_names(client_id)["passages"]
 
     try:
         # Fetch current document to merge metadata
@@ -413,6 +415,7 @@ def update_passage(
 
         title = f"[{merged_doc_type.upper()} | {merged_language.upper()}] {merged_text[:60]}..."
         metadata = {
+            "client_id": client_id,
             "doc_type": merged_doc_type,
             "language": merged_language,
             "domain": merged_domain,

@@ -36,7 +36,7 @@ def add_term(
     why: str = "",
     example_bad: str = "",
     example_good: str = "",
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """Store a terminology entry in the user's writing_terms collection."""
     if not preferred or not preferred.strip():
@@ -48,7 +48,7 @@ def add_term(
         }
 
     document_id = str(uuid4())
-    collection = get_collection_names(user_id)["terms"]
+    collection = get_collection_names(client_id)["terms"]
 
     content_parts = [
         f"Preferred term: {preferred}",
@@ -62,6 +62,7 @@ def add_term(
     content = "\n".join(p for p in content_parts if p)
 
     metadata = {
+        "client_id": client_id,
         "preferred": preferred,
         "avoid": avoid,
         "domain": domain,
@@ -89,7 +90,7 @@ def add_term(
         }
     except Exception as e:
         logger.error("Failed to add term", error=str(e))
-        capture_tool_error(e, tool_name="add_term", user_id=user_id)
+        capture_tool_error(e, tool_name="add_term", client_id=client_id)
         return {"success": False, "error": str(e)}
 
 
@@ -98,7 +99,7 @@ def search_terms(
     domain: Optional[str] = None,
     language: Optional[str] = None,
     top_k: int = 8,
-    user_id: str = "default",
+    client_id: str = "default",
     include_shared: bool = True,
 ) -> dict:
     """Search the user's terminology dictionary and (optionally) the shared published pool.
@@ -141,7 +142,7 @@ def search_terms(
         except Exception:
             return []
 
-    personal = _fetch(get_collection_names(user_id)["terms"], "personal")
+    personal = _fetch(get_collection_names(client_id)["terms"], "personal")
 
     shared: list = []
     if include_shared:
@@ -164,9 +165,9 @@ def search_terms(
     return {"success": True, "results": merged, "total": len(merged)}
 
 
-def delete_term(document_id: str, user_id: str = "default") -> dict:
+def delete_term(document_id: str, client_id: str = "default") -> dict:
     """Delete a term from the user's writing_terms collection by document_id."""
-    collection = get_collection_names(user_id)["terms"]
+    collection = get_collection_names(client_id)["terms"]
     try:
         check_result = check_document_indexed(
             collection_name=collection,
@@ -186,7 +187,7 @@ def delete_term(document_id: str, user_id: str = "default") -> dict:
         return {"success": False, "error": str(e)}
 
 
-def batch_add_terms(items: list, user_id: str = "default") -> dict:
+def batch_add_terms(items: list, client_id: str = "default") -> dict:
     """Add multiple terminology entries in a single call. Never raises; collects per-item errors."""
     results = []
     succeeded = 0
@@ -210,7 +211,7 @@ def batch_add_terms(items: list, user_id: str = "default") -> dict:
             why=item.get("why", ""),
             example_bad=item.get("example_bad", ""),
             example_good=item.get("example_good", ""),
-            user_id=user_id,
+            client_id=client_id,
         )
         result["index"] = i
         results.append(result)
@@ -238,7 +239,7 @@ def update_term(
     why: Optional[str] = None,
     example_bad: Optional[str] = None,
     example_good: Optional[str] = None,
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """Update a term by deleting and re-indexing with merged metadata."""
     updated_fields = [
@@ -263,7 +264,7 @@ def update_term(
             "error": f"Invalid language '{language}'. Must be one of: {sorted(VALID_LANGUAGES)}",
         }
 
-    collection = get_collection_names(user_id)["terms"]
+    collection = get_collection_names(client_id)["terms"]
 
     try:
         client = get_qdrant_client()
@@ -314,6 +315,7 @@ def update_term(
         content = "\n".join(p for p in content_parts if p)
 
         metadata = {
+            "client_id": client_id,
             "preferred": merged_preferred,
             "avoid": merged_avoid,
             "domain": merged_domain,

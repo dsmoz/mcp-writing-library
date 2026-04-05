@@ -156,6 +156,7 @@ uv run python main.py
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.6.0 | 2026-04-05 | Railway-ready: X-Client-ID ContextVar, user_id→client_id rename, client_id in payload |
 | 1.5.0 | 2026-04-04 | Remove external KB coupling; admin-guard core writes; restrict export aliases |
 | 1.4.1 | 2026-04-03 | Fix missing `psutil` dependency; restores search_terms, search_thesaurus, get_library_stats |
 | 1.4.0 | 2026-04-03 | Multi-tenant isolation, contribution moderation, channel-tagged style profiles |

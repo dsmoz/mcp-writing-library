@@ -32,16 +32,21 @@ Tools:
 """
 import os
 import sys
+from contextvars import ContextVar
 from typing import Optional, List
 from mcp.server.fastmcp import FastMCP, Context
 
+# ContextVar set by BearerAuthMiddleware from X-Client-ID header (gateway-injected)
+current_client_id: ContextVar[str | None] = ContextVar("current_client_id", default=None)
 
-def _user_id(ctx: Context) -> str:
-    """Extract client_id from OAuth context; fall back to 'default' in stdio mode."""
-    if ctx is None:
-        return "default"
-    client_id = ctx.client_id
-    return client_id if client_id else "default"
+
+def _client_id(ctx: Context) -> str:
+    """Extract client_id from MCP context, middleware ContextVar, or fall back to 'default'."""
+    if ctx is not None and ctx.client_id:
+        return ctx.client_id
+    # Fall back to gateway-injected X-Client-ID (set by middleware)
+    cv = current_client_id.get()
+    return cv if cv else "default"
 
 
 def _require_admin(ctx: Context) -> Optional[str]:
@@ -49,7 +54,7 @@ def _require_admin(ctx: Context) -> Optional[str]:
     admin_id = os.getenv("ADMIN_CLIENT_ID", "")
     if not admin_id:
         return "ADMIN_CLIENT_ID is not configured — admin tools are disabled"
-    caller = _user_id(ctx)
+    caller = _client_id(ctx)
     if caller != admin_id:
         return f"Admin access required. Caller '{caller}' is not the configured admin."
     return None
@@ -65,7 +70,7 @@ def _check_auth(token: str) -> bool:
 
 
 class BearerAuthMiddleware:
-    """Simple ASGI middleware — rejects requests without a valid API_TOKENS bearer token."""
+    """ASGI middleware — validates bearer token and extracts X-Client-ID from gateway."""
     def __init__(self, app):
         self.app = app
 
@@ -81,6 +86,14 @@ class BearerAuthMiddleware:
                             "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
                 await send({"type": "http.response.body", "body": body})
                 return
+            # Extract client_id from gateway-injected X-Client-ID header
+            client_id_val = headers.get(b"x-client-id", b"").decode() or None
+            ctx_token = current_client_id.set(client_id_val)
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                current_client_id.reset(ctx_token)
+            return
         await self.app(scope, receive, send)
 
 
@@ -135,7 +148,7 @@ def search_passages(
     return _search(
         query=query, doc_type=doc_type, language=language, domain=domain,
         style=style, rubric_section=rubric_section, top_k=top_k,
-        user_id=_user_id(ctx),
+        client_id=_client_id(ctx),
     )
 
 
@@ -182,7 +195,7 @@ def add_passage(
         text=text, doc_type=doc_type, language=language, domain=domain,
         quality_notes=quality_notes, tags=tags or [], source=source,
         style=style or [], rubric_section=rubric_section,
-        user_id=_user_id(ctx),
+        client_id=_client_id(ctx),
     )
 
 
@@ -231,7 +244,7 @@ def search_terms(
         List of terminology entries with preferred/avoid pairs and examples
     """
     from src.tools.terms import search_terms as _search
-    return _search(query=query, domain=domain, language=language, top_k=top_k, user_id=_user_id(ctx))
+    return _search(query=query, domain=domain, language=language, top_k=top_k, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -267,7 +280,7 @@ def add_term(
     return _add(
         preferred=preferred, avoid=avoid, domain=domain, language=language,
         why=why, example_bad=example_bad, example_good=example_good,
-        user_id=_user_id(ctx),
+        client_id=_client_id(ctx),
     )
 
 
@@ -312,7 +325,7 @@ def record_correction(
     return _record(
         original=original, corrected=corrected, issue_type=issue_type,
         doc_type=doc_type, language=language, domain=domain, source=source,
-        user_id=_user_id(ctx),
+        client_id=_client_id(ctx),
     )
 
 
@@ -332,7 +345,7 @@ def delete_passage(document_id: str, ctx: Context) -> dict:
         or {success: False, error} if not found or deletion fails
     """
     from src.tools.passages import delete_passage as _delete
-    return _delete(document_id=document_id, user_id=_user_id(ctx))
+    return _delete(document_id=document_id, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -374,7 +387,7 @@ def update_passage(
         document_id=document_id,
         text=text, doc_type=doc_type, language=language, domain=domain,
         quality_notes=quality_notes, tags=tags, source=source, style=style,
-        user_id=_user_id(ctx),
+        client_id=_client_id(ctx),
     )
 
 
@@ -394,7 +407,7 @@ def delete_term(document_id: str, ctx: Context) -> dict:
         or {success: False, error} if not found or deletion fails
     """
     from src.tools.terms import delete_term as _delete
-    return _delete(document_id=document_id, user_id=_user_id(ctx))
+    return _delete(document_id=document_id, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -434,7 +447,7 @@ def update_term(
         document_id=document_id,
         preferred=preferred, avoid=avoid, domain=domain, language=language,
         why=why, example_bad=example_bad, example_good=example_good,
-        user_id=_user_id(ctx),
+        client_id=_client_id(ctx),
     )
 
 
@@ -449,7 +462,7 @@ def get_library_stats(ctx: Context) -> dict:
         Stats for writing_passages and writing_terms collections
     """
     from src.tools.collections import get_stats
-    return get_stats(user_id=_user_id(ctx))
+    return get_stats(client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -463,7 +476,7 @@ def setup_collections(ctx: Context) -> dict:
         Status for each collection (created|already_exists|error)
     """
     from src.tools.collections import setup_collections as _setup
-    return _setup(user_id=_user_id(ctx))
+    return _setup(client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -496,7 +509,7 @@ def check_internal_similarity(
         threshold=threshold,
         top_k_per_sentence=top_k_per_sentence,
         verdict_threshold_pct=verdict_threshold_pct,
-        user_id=_user_id(ctx),
+        client_id=_client_id(ctx),
     )
 
 
@@ -587,7 +600,7 @@ def save_style_profile(
         description=description,
         source_documents=source_documents,
         channel=channel,
-        user_id=_user_id(ctx),
+        client_id=_client_id(ctx),
     )
 
 
@@ -606,7 +619,7 @@ def load_style_profile(name: str, ctx: Context) -> dict:
         {success, profile} with full profile payload, or {success: False, error}
     """
     from src.tools.style_profiles import load_style_profile as _load
-    return _load(name=name, user_id=_user_id(ctx))
+    return _load(name=name, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -660,7 +673,7 @@ def update_style_profile(
         description=description,
         channel=channel,
         score_weight=score_weight,
-        user_id=_user_id(ctx),
+        client_id=_client_id(ctx),
     )
 
 
@@ -707,7 +720,7 @@ def harvest_corrections_to_profile(
         domain=domain,
         min_corrections=min_corrections,
         top_k=top_k,
-        user_id=_user_id(ctx),
+        client_id=_client_id(ctx),
     )
 
 
@@ -734,7 +747,7 @@ def search_style_profiles(
         {success, results: [{score, profile}], total}
     """
     from src.tools.style_profiles import search_style_profiles as _search
-    return _search(text=text, top_k=top_k, channel=channel, user_id=_user_id(ctx))
+    return _search(text=text, top_k=top_k, channel=channel, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -760,7 +773,7 @@ def list_style_profiles(
         {success, profiles: [{name, description, channel, style_scores, created_at, document_id}], total}
     """
     from src.tools.style_profiles import list_style_profiles as _list
-    return _list(channel=channel, limit=limit, user_id=_user_id(ctx))
+    return _list(channel=channel, limit=limit, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -811,7 +824,7 @@ def batch_add_passages(items: list[dict], ctx: Context) -> dict:
         {success: True, total, succeeded, failed, results: [per-item result with index]}
     """
     from src.tools.passages import batch_add_passages as _batch
-    return _batch(items=items, user_id=_user_id(ctx))
+    return _batch(items=items, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -831,7 +844,7 @@ def batch_add_terms(items: list[dict], ctx: Context) -> dict:
         {success: True, total, succeeded, failed, results: [per-item result with index]}
     """
     from src.tools.terms import batch_add_terms as _batch
-    return _batch(items=items, user_id=_user_id(ctx))
+    return _batch(items=items, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -855,7 +868,7 @@ def export_library(collection: str, ctx: Context, output_format: str = "json") -
         On failure: {success: False, error}.
     """
     from src.tools.export import export_library as _export
-    return _export(collection=collection, output_format=output_format, user_id=_user_id(ctx))
+    return _export(collection=collection, output_format=output_format, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -1197,7 +1210,7 @@ def score_semantic_ai_likelihood(text: str, ctx: Context, top_k: int = 10) -> di
          human_sample_count, method ("semantic"|"insufficient_data")}
     """
     from src.tools.ai_patterns import score_semantic_ai_likelihood as _score
-    return _score(text=text, top_k=top_k, user_id=_user_id(ctx))
+    return _score(text=text, top_k=top_k, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -1522,10 +1535,10 @@ def contribute_term(
     result = _contribute(
         preferred=preferred, avoid=avoid, domain=domain, language=language,
         why=why, example_bad=example_bad, example_good=example_good,
-        contributed_by=_user_id(ctx), note=note,
+        contributed_by=_client_id(ctx), note=note,
     )
     if result.get("success"):
-        _notify_contribution(result["contribution_id"], "terms", preferred, _user_id(ctx))
+        _notify_contribution(result["contribution_id"], "terms", preferred, _client_id(ctx))
     return result
 
 
@@ -1575,10 +1588,10 @@ def contribute_thesaurus_entry(
         register=register, alternatives=alternatives or [],
         collocations=collocations or [], why_avoid=why_avoid,
         example_bad=example_bad, example_good=example_good,
-        contributed_by=_user_id(ctx), note=note,
+        contributed_by=_client_id(ctx), note=note,
     )
     if result.get("success"):
-        _notify_contribution(result["contribution_id"], "thesaurus", headword, _user_id(ctx))
+        _notify_contribution(result["contribution_id"], "thesaurus", headword, _client_id(ctx))
     return result
 
 
@@ -1612,10 +1625,10 @@ def contribute_rubric(
     result = _contribute(
         framework=framework, section=section, criterion=criterion,
         weight=weight, red_flags=red_flags or [],
-        contributed_by=_user_id(ctx), note=note,
+        contributed_by=_client_id(ctx), note=note,
     )
     if result.get("success"):
-        _notify_contribution(result["contribution_id"], "rubrics", f"{framework}/{section}", _user_id(ctx))
+        _notify_contribution(result["contribution_id"], "rubrics", f"{framework}/{section}", _client_id(ctx))
     return result
 
 
@@ -1644,10 +1657,10 @@ def contribute_template(
     from src.tools.contributions import contribute_template as _contribute
     result = _contribute(
         framework=framework, doc_type=doc_type, sections=sections,
-        contributed_by=_user_id(ctx), note=note,
+        contributed_by=_client_id(ctx), note=note,
     )
     if result.get("success"):
-        _notify_contribution(result["contribution_id"], "templates", f"{framework}/{doc_type}", _user_id(ctx))
+        _notify_contribution(result["contribution_id"], "templates", f"{framework}/{doc_type}", _client_id(ctx))
     return result
 
 
@@ -1675,7 +1688,7 @@ def list_contributions(
     """
     from src.tools.contributions import list_contributions as _list
 
-    caller = _user_id(ctx)
+    caller = _client_id(ctx)
     admin_id = os.getenv("ADMIN_CLIENT_ID", "")
     is_admin = bool(admin_id) and caller == admin_id
 
@@ -1714,7 +1727,7 @@ def review_contribution(
     return _review(
         contribution_id=contribution_id,
         action=action,
-        reviewed_by=_user_id(ctx),
+        reviewed_by=_client_id(ctx),
         rejection_reason=rejection_reason,
     )
 

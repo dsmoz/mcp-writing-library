@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
+## [1.6.0] - 2026-04-05
+
+### Added
+
+- `X-Client-ID` header extraction in `BearerAuthMiddleware` via `ContextVar` — gateway-injected tenant identity flows automatically to all tool handlers
+- `client_id` field in Qdrant payload metadata for all per-user collections (passages, terms, style_profiles) — future-proofs migration to single-collection filter-based isolation
+
+### Changed
+
+- Renamed `user_id` parameter to `client_id` across all tool modules (passages, terms, collections, style_profiles, plagiarism, ai_patterns, export, sentry) — 109 occurrences harmonised with DS-MOZ development standard
+- `_user_id(ctx)` renamed to `_client_id(ctx)` with ContextVar fallback: `ctx.client_id` → `current_client_id` ContextVar → `"default"`
+- `_safe_user_id()` renamed to `_safe_client_id()`
+- `get_user_collection_names(user_id)` → `get_user_collection_names(client_id)`
+
+### Fixed
+
+- `test_collections.py` — updated stale tests that predated multi-tenant prefix (expected `writing_passages` instead of `default_writing_passages`)
+
 ## [1.5.0] - 2026-04-04
 
 ### Changed

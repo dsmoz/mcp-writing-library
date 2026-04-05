@@ -16,19 +16,19 @@ except ImportError:
     get_qdrant_client = None  # type: ignore
 
 
-def _resolve_collection(collection: str, user_id: str = "default") -> str | None:
+def _resolve_collection(collection: str, client_id: str = "default") -> str | None:
     """Return the Qdrant collection name for a known logical alias only.
 
     Raw Qdrant collection names are not accepted — callers must use aliases
     like 'passages', 'terms', 'rubrics', etc.
     """
-    names = get_collection_names(user_id)
+    names = get_collection_names(client_id)
     if collection in names:
         return names[collection]
     return None
 
 
-def export_library(collection: str, output_format: str = "json", user_id: str = "default") -> dict:
+def export_library(collection: str, output_format: str = "json", client_id: str = "default") -> dict:
     """
     Export all points from a writing library collection.
 
@@ -45,9 +45,9 @@ def export_library(collection: str, output_format: str = "json", user_id: str = 
     if get_qdrant_client is None:
         return {"success": False, "error": "kbase library is not available"}
 
-    collection_name = _resolve_collection(collection, user_id)
+    collection_name = _resolve_collection(collection, client_id)
     if collection_name is None:
-        names = get_collection_names(user_id)
+        names = get_collection_names(client_id)
         return {
             "success": False,
             "error": (

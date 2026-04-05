@@ -9,11 +9,11 @@ Multi-tenant architecture (Option B — collection prefix):
         writing_templates
 
     Per-user collections (isolated by client_id prefix):
-        {user_id}_writing_passages
-        {user_id}_writing_terms
-        {user_id}_writing_style_profiles
+        {client_id}_writing_passages
+        {client_id}_writing_terms
+        {client_id}_writing_style_profiles
 
-    In stdio mode (no auth), user_id defaults to "default", giving:
+    In stdio mode (no auth), client_id defaults to "default", giving:
         default_writing_passages
         default_writing_terms
         default_writing_style_profiles
@@ -35,8 +35,8 @@ VECTOR_SIZE = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))  # text-embedding-3
 # Sanitise client_id to a safe Qdrant collection name segment.
 # Qdrant collection names allow [a-zA-Z0-9_-]; replace anything else with _.
 import re
-def _safe_user_id(user_id: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", user_id)
+def _safe_client_id(client_id: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", client_id)
 
 
 def get_core_collection_names() -> dict:
@@ -54,9 +54,9 @@ def get_core_collection_names() -> dict:
     }
 
 
-def get_user_collection_names(user_id: str = "default") -> dict:
-    """Return per-user collection names prefixed with the user_id."""
-    uid = _safe_user_id(user_id)
+def get_user_collection_names(client_id: str = "default") -> dict:
+    """Return per-user collection names prefixed with the client_id."""
+    uid = _safe_client_id(client_id)
     return {
         "passages": f"{uid}_writing_passages",
         "terms": f"{uid}_writing_terms",
@@ -64,12 +64,12 @@ def get_user_collection_names(user_id: str = "default") -> dict:
     }
 
 
-def get_collection_names(user_id: str = "default") -> dict:
+def get_collection_names(client_id: str = "default") -> dict:
     """Return all collection names — user-scoped + core — for a given user."""
-    return {**get_user_collection_names(user_id), **get_core_collection_names()}
+    return {**get_user_collection_names(client_id), **get_core_collection_names()}
 
 
-def setup_user_collections(user_id: str = "default") -> dict:
+def setup_user_collections(client_id: str = "default") -> dict:
     """
     Ensure per-user Qdrant collections exist. Called lazily on first authenticated request.
     Core collections are NOT created here — seed scripts handle those.
@@ -77,7 +77,7 @@ def setup_user_collections(user_id: str = "default") -> dict:
     """
     from kbase.vector.sync_indexing import ensure_collection
 
-    names = get_user_collection_names(user_id)
+    names = get_user_collection_names(client_id)
     results = {}
 
     for key, collection_name in names.items():
@@ -98,14 +98,14 @@ def setup_user_collections(user_id: str = "default") -> dict:
     return results
 
 
-def setup_collections(user_id: str = "default") -> dict:
+def setup_collections(client_id: str = "default") -> dict:
     """
     Ensure all Qdrant collections exist — both core and per-user.
     Returns dict with creation status for each collection.
     """
     from kbase.vector.sync_indexing import ensure_collection
 
-    all_names = get_collection_names(user_id)
+    all_names = get_collection_names(client_id)
     results = {}
 
     for key, collection_name in all_names.items():
@@ -126,11 +126,11 @@ def setup_collections(user_id: str = "default") -> dict:
     return results
 
 
-def get_stats(user_id: str = "default") -> dict:
+def get_stats(client_id: str = "default") -> dict:
     """Return point counts for all collections (user + core)."""
     from kbase.vector.sync_search import get_collection_stats
 
-    names = get_collection_names(user_id)
+    names = get_collection_names(client_id)
     stats = {}
 
     for key, collection_name in names.items():

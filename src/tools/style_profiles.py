@@ -16,9 +16,9 @@ from src.tools.registry import VALID_CHANNELS
 logger = structlog.get_logger(__name__)
 
 
-def _style_profiles_collection(user_id: str = "default") -> str:
+def _style_profiles_collection(client_id: str = "default") -> str:
     from src.tools.collections import get_user_collection_names
-    return get_user_collection_names(user_id)["style_profiles"]
+    return get_user_collection_names(client_id)["style_profiles"]
 
 try:
     from kbase.vector.sync_indexing import index_document, delete_document_vectors
@@ -51,7 +51,7 @@ def save_style_profile(
     description: str = "",
     source_documents: Optional[list] = None,
     channel: Optional[str] = None,
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """
     Save a writing style profile extracted from writing samples.
@@ -106,6 +106,7 @@ def save_style_profile(
     created_at = datetime.utcnow().isoformat()
 
     payload = {
+        "client_id": client_id,
         "name": name.strip(),
         "description": description,
         "style_scores": clamped,
@@ -134,7 +135,7 @@ def save_style_profile(
 
     try:
         point_ids = index_document(
-            collection_name=_style_profiles_collection(user_id),
+            collection_name=_style_profiles_collection(client_id),
             document_id=document_id,
             title=title,
             content=embed_text,
@@ -150,11 +151,11 @@ def save_style_profile(
         }
     except Exception as e:
         logger.error("Failed to save style profile", name=name, error=str(e))
-        capture_tool_error(e, tool_name="save_style_profile", name=name, user_id=user_id)
+        capture_tool_error(e, tool_name="save_style_profile", name=name, client_id=client_id)
         return {"success": False, "error": str(e)}
 
 
-def load_style_profile(name: str, user_id: str = "default") -> dict:
+def load_style_profile(name: str, client_id: str = "default") -> dict:
     """
     Load a saved style profile by exact name.
 
@@ -172,7 +173,7 @@ def load_style_profile(name: str, user_id: str = "default") -> dict:
         from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
         results, _ = client.scroll(
-            collection_name=_style_profiles_collection(user_id),
+            collection_name=_style_profiles_collection(client_id),
             scroll_filter=Filter(
                 must=[FieldCondition(key="name", match=MatchValue(value=name.strip()))]
             ),
@@ -202,7 +203,7 @@ def update_style_profile(
     description: Optional[str] = None,
     channel: Optional[str] = None,
     score_weight: float = 0.3,
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """
     Merge new evidence into an existing style profile without overwriting it.
@@ -230,7 +231,7 @@ def update_style_profile(
         return {"success": False, "error": "score_weight must be between 0.0 (exclusive) and 1.0"}
 
     # Load existing profile
-    load_result = load_style_profile(name, user_id=user_id)
+    load_result = load_style_profile(name, client_id=client_id)
     if not load_result["success"]:
         return load_result
 
@@ -304,7 +305,7 @@ def update_style_profile(
         from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
         old_results, _ = client.scroll(
-            collection_name=_style_profiles_collection(user_id),
+            collection_name=_style_profiles_collection(client_id),
             scroll_filter=Filter(
                 must=[FieldCondition(key="name", match=MatchValue(value=name.strip()))]
             ),
@@ -314,7 +315,7 @@ def update_style_profile(
         )
         if old_results and delete_document_vectors is not None:
             delete_document_vectors(
-                collection_name=_style_profiles_collection(user_id),
+                collection_name=_style_profiles_collection(client_id),
                 document_id=old_results[0].payload.get("document_id", str(old_results[0].id)),
             )
     except Exception as e:
@@ -330,7 +331,7 @@ def update_style_profile(
         description=merged_description,
         source_documents=merged_sources,
         channel=merged_channel,
-        user_id=user_id,
+        client_id=client_id,
     )
 
     if result.get("success"):
@@ -347,7 +348,7 @@ def harvest_corrections_to_profile(
     domain: Optional[str] = None,
     min_corrections: int = 3,
     top_k: int = 20,
-    user_id: str = "default",
+    client_id: str = "default",
 ) -> dict:
     """
     Scan human-corrected passages in the library and propose additions to a style profile.
@@ -386,7 +387,7 @@ def harvest_corrections_to_profile(
         return {"success": False, "error": "profile_name cannot be empty"}
 
     # Verify profile exists
-    load_result = load_style_profile(profile_name, user_id=user_id)
+    load_result = load_style_profile(profile_name, client_id=client_id)
     if not load_result["success"]:
         return load_result
 
@@ -395,7 +396,7 @@ def harvest_corrections_to_profile(
 
     try:
         from src.tools.collections import get_collection_names
-        collection = get_collection_names(user_id)["passages"]
+        collection = get_collection_names(client_id)["passages"]
 
         filter_conditions: dict = {"entry_type": "correction"}
         if language:
@@ -518,7 +519,7 @@ def harvest_corrections_to_profile(
 def search_style_profiles(
     text: str,
     top_k: int = 3,
-    user_id: str = "default",
+    client_id: str = "default",
     channel: Optional[str] = None,
 ) -> dict:
     """
@@ -540,7 +541,7 @@ def search_style_profiles(
     try:
         filter_conditions = {"channel": channel} if channel else None
         raw_results = semantic_search(
-            collection_name=_style_profiles_collection(user_id),
+            collection_name=_style_profiles_collection(client_id),
             query=text,
             limit=top_k,
             filter_conditions=filter_conditions,
@@ -556,13 +557,13 @@ def search_style_profiles(
         return {"success": True, "results": results, "total": len(results)}
     except Exception as e:
         logger.error("Style profile search failed", error=str(e))
-        capture_tool_error(e, tool_name="search_style_profiles", user_id=user_id)
+        capture_tool_error(e, tool_name="search_style_profiles", client_id=client_id)
         return {"success": False, "error": str(e), "results": []}
 
 
 def list_style_profiles(
     channel: Optional[str] = None,
-    user_id: str = "default",
+    client_id: str = "default",
     limit: int = 50,
 ) -> dict:
     """
@@ -587,7 +588,7 @@ def list_style_profiles(
             )
 
         results, _ = client.scroll(
-            collection_name=_style_profiles_collection(user_id),
+            collection_name=_style_profiles_collection(client_id),
             scroll_filter=scroll_filter,
             limit=limit,
             with_payload=True,
@@ -612,5 +613,5 @@ def list_style_profiles(
         return {"success": True, "profiles": profiles, "total": len(profiles)}
     except Exception as e:
         logger.error("list_style_profiles failed", error=str(e))
-        capture_tool_error(e, tool_name="list_style_profiles", user_id=user_id)
+        capture_tool_error(e, tool_name="list_style_profiles", client_id=client_id)
         return {"success": False, "error": str(e), "profiles": []}

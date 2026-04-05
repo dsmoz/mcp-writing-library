@@ -11,7 +11,7 @@ def capture_tool_error(exc: Exception, tool_name: str, **context) -> None:
         exc: The exception to capture.
         tool_name: Name of the MCP tool that failed (e.g. "add_passage").
         **context: Additional key/value pairs attached as Sentry extras
-                   (e.g. user_id="default", domain="health").
+                   (e.g. client_id="default", domain="health").
     """
     with sentry_sdk.new_scope() as scope:
         scope.set_tag("tool", tool_name)

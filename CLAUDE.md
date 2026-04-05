@@ -13,12 +13,12 @@ The server uses **collection-prefix isolation (Option B)** to support multiple u
 | **Per-user** | `{client_id}_writing_passages`, `{client_id}_writing_terms`, `{client_id}_writing_style_profiles` | Scoped to OAuth `client_id`; never visible to other users |
 | **Core/shared** | `writing_thesaurus`, `writing_rubrics`, `writing_templates` | Global; read by all users; managed by seed scripts |
 
-### How user_id flows
+### How client_id flows
 
-1. HTTP transport: `BearerAuthMiddleware` validates token against `API_TOKENS`. **Note:** the token validates access but does NOT extract a user_id — client_id resolution depends on MCP context negotiation.
-2. `_user_id(ctx)` in `server.py` extracts `ctx.client_id`, falls back to `"default"` when None (stdio mode or unconfigured)
-3. `get_user_collection_names(user_id)` in `collections.py` prefixes with sanitised client_id → `{uid}_writing_passages` etc.
-4. Per-user collections are created lazily via `setup_collections(user_id)` on first call
+1. HTTP transport: `BearerAuthMiddleware` validates Bearer token against `API_TOKENS`, then extracts `client_id` from the gateway-injected `X-Client-ID` header and stores it in a `ContextVar`.
+2. `_client_id(ctx)` in `server.py` reads `ctx.client_id` (MCP native) → falls back to `current_client_id` ContextVar (middleware-injected) → falls back to `"default"`.
+3. `get_user_collection_names(client_id)` in `collections.py` prefixes with sanitised client_id → `{cid}_writing_passages` etc.
+4. Per-user collections are created lazily via `setup_collections(client_id)` on first call.
 
 ### stdio mode / local dev
 
@@ -26,7 +26,7 @@ With `TRANSPORT=stdio`, there is no auth context. All tools operate on `default_
 
 ### HTTP mode / multi-tenant
 
-With `TRANSPORT=http` and `API_TOKENS` set, the Bearer token authenticates the caller but does **not** carry user identity. For true per-user isolation, the calling gateway must set MCP `client_id` correctly via context negotiation. Future work: JWT parsing or token-to-user mapping to extract user_id from the token itself.
+With `TRANSPORT=http` and `API_TOKENS` set, the `mcp-oauth-server` gateway authenticates the caller, resolves their `client_id`, and forwards it via the `X-Client-ID` HTTP header. `BearerAuthMiddleware` reads this header and sets the `current_client_id` ContextVar so all tool handlers receive the correct tenant identity automatically.
 
 ### Core collection access control
 
@@ -34,7 +34,7 @@ Write operations on core/shared collections (`add_rubric_criterion`, `add_templa
 
 ### client_id sanitisation
 
-`_safe_user_id()` replaces any character outside `[a-zA-Z0-9_-]` with `_` to produce valid Qdrant collection name segments.
+`_safe_client_id()` replaces any character outside `[a-zA-Z0-9_-]` with `_` to produce valid Qdrant collection name segments.
 
 ## Module Reference
 
@@ -42,7 +42,7 @@ Write operations on core/shared collections (`add_rubric_criterion`, `add_templa
 |--------|-----------|-------------|
 | `src/tools/passages` | `add_passage`, `search_passages`, `update_passage`, `delete_passage`, `batch_add_passages` | Store and retrieve exemplary writing passages (per-user) |
 | `src/tools/terms` | `add_term`, `search_terms`, `update_term`, `delete_term`, `batch_add_terms` | Store and retrieve terminology dictionary entries (per-user) |
-| `src/tools/collections` | `get_collection_names`, `get_user_collection_names`, `get_core_collection_names`, `setup_collections`, `setup_user_collections`, `get_stats` | Manage Qdrant collections; user_id-aware |
+| `src/tools/collections` | `get_collection_names`, `get_user_collection_names`, `get_core_collection_names`, `setup_collections`, `setup_user_collections`, `get_stats` | Manage Qdrant collections; client_id-aware |
 | `src/tools/contributions` | `contribute`, `contribute_term`, `contribute_thesaurus_entry`, `contribute_rubric`, `contribute_template`, `list_contributions`, `review_contribution` | Moderation queue for user contributions to shared collections |
 | `src/tools/export` | `export_library` | Export any collection to JSON or CSV |
 | `src/tools/styles` | `list_styles` | Writing style registry (14 labels across 4 categories) |
