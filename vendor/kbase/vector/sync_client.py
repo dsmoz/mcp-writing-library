@@ -2,7 +2,7 @@
 Synchronous Qdrant Client Singleton
 
 This module provides a singleton QdrantClient instance for sync operations.
-Based on the pattern from mcp-zotero-qdrant.
+Based on the pattern from mcp-scholar.
 
 Performance Impact:
 - Before: 10-50ms overhead per operation (new connection)

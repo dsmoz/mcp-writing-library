@@ -4,7 +4,7 @@ Retry mechanism with exponential backoff for handling transient failures.
 Provides configurable retry logic with categorization of errors,
 exponential backoff with jitter, and both sync and async support.
 
-Based on patterns from mcp-zotero-qdrant but generalized for reuse.
+Based on patterns from mcp-scholar but generalized for reuse.
 """
 
 import time

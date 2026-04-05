@@ -11,7 +11,7 @@ Features:
 - Cancel active pause
 - Persistent pause state across restarts
 
-Based on mcp-zotero-qdrant's processor_pause.py.
+Based on mcp-scholar's processor_pause.py.
 
 Usage:
     from kbase.jobs.pause import ProcessorPauseManager, get_pause_manager

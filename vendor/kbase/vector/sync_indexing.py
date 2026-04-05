@@ -4,7 +4,7 @@ Synchronous Document Indexing
 This module provides synchronous document indexing for Qdrant.
 Handles chunking, embedding generation, and upserting to Qdrant.
 
-Based on the indexing strategy from mcp-zotero-qdrant.
+Based on the indexing strategy from mcp-scholar.
 
 Usage:
     from kbase.vector.sync_indexing import index_document, index_documents_batch

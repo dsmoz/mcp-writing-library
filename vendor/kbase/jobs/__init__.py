@@ -6,7 +6,7 @@ memory management, and cleanup utilities. Works with both async and sync
 processing patterns.
 
 This module is designed to be used by multiple MCP servers (mcp-cerebellum,
-mcp-zotero-qdrant, etc.) while maintaining backwards compatibility.
+mcp-scholar, etc.) while maintaining backwards compatibility.
 
 Usage:
     from kbase.jobs import JobQueue, BaseJobProcessor, RetryManager
@@ -101,7 +101,7 @@ from kbase.jobs.cleanup import (
     JobQueueCleanup,
     cleanup_all,
     get_all_statistics,
-    # Compatibility functions for mcp-zotero-qdrant
+    # Compatibility functions for mcp-scholar
     perform_process_monitor_cleanup,
     get_process_monitor_statistics,
     restore_process_monitor_backup,

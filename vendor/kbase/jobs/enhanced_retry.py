@@ -9,7 +9,7 @@ specifically designed for chunked processing failures. It implements:
 3. Pre-emptive memory monitoring to prevent failures
 4. Graceful degradation for problematic documents
 
-Based on mcp-zotero-qdrant's enhanced_retry.py.
+Based on mcp-scholar's enhanced_retry.py.
 """
 
 import asyncio

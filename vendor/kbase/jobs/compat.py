@@ -1,10 +1,10 @@
 """
-Compatibility Layer for mcp-zotero-qdrant
+Compatibility Layer for mcp-scholar
 
 This module provides compatibility imports for projects migrating from
-mcp-zotero-qdrant's job modules to the unified kbase.jobs module.
+mcp-scholar's job modules to the unified kbase.jobs module.
 
-Usage in mcp-zotero-qdrant:
+Usage in mcp-scholar:
     # Instead of:
     # from src.jobs.retry_manager import RetryManager, categorize_error
     # from src.jobs.processor_pause import ProcessorPauseManager
@@ -13,7 +13,7 @@ Usage in mcp-zotero-qdrant:
     from kbase.jobs.compat import RetryManager, categorize_error
     from kbase.jobs.compat import ProcessorPauseManager
 
-This allows gradual migration while keeping mcp-zotero-qdrant's specialized
+This allows gradual migration while keeping mcp-scholar's specialized
 queue implementation.
 """
 

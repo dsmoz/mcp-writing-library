@@ -7,7 +7,7 @@ Automatically manages JSONL files to prevent unbounded growth:
 - Maintains configurable retention periods
 - Provides emergency recovery mechanisms
 
-Based on mcp-zotero-qdrant's process_monitor_cleanup.py.
+Based on mcp-scholar's process_monitor_cleanup.py.
 """
 
 import gzip
@@ -608,7 +608,7 @@ def get_all_statistics(queue_dir: str = ".jobs") -> Dict[str, Any]:
     }
 
 
-# Compatibility functions matching mcp-zotero-qdrant's process_monitor_cleanup.py API
+# Compatibility functions matching mcp-scholar's process_monitor_cleanup.py API
 def perform_process_monitor_cleanup(
     queue_dir: str = ".jobs",
     force: bool = False,
@@ -617,7 +617,7 @@ def perform_process_monitor_cleanup(
     """
     Perform cleanup on process_monitor.jsonl.
 
-    Compatibility function for mcp-zotero-qdrant migration.
+    Compatibility function for mcp-scholar migration.
 
     Args:
         queue_dir: Queue directory path
@@ -636,8 +636,8 @@ def get_process_monitor_statistics(queue_dir: str = ".jobs") -> Dict[str, Any]:
     """
     Get statistics for process_monitor.jsonl.
 
-    Compatibility function for mcp-zotero-qdrant migration.
-    Returns structure compatible with mcp-zotero-qdrant's process_monitor_cleanup.py script.
+    Compatibility function for mcp-scholar migration.
+    Returns structure compatible with mcp-scholar's process_monitor_cleanup.py script.
 
     Args:
         queue_dir: Queue directory path
@@ -647,7 +647,7 @@ def get_process_monitor_statistics(queue_dir: str = ".jobs") -> Dict[str, Any]:
     """
     stats = ProcessMonitorCleanup(queue_dir).get_statistics()
 
-    # Transform to match expected format from mcp-zotero-qdrant
+    # Transform to match expected format from mcp-scholar
     return {
         "monitor_file": {
             "exists": stats["file"]["exists"],
@@ -668,7 +668,7 @@ def restore_process_monitor_backup(
     """
     Restore process_monitor.jsonl from backup.
 
-    Compatibility function for mcp-zotero-qdrant migration.
+    Compatibility function for mcp-scholar migration.
 
     Args:
         queue_dir: Queue directory path

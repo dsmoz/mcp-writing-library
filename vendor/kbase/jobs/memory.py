@@ -5,7 +5,7 @@ Pre-emptive memory monitoring to prevent failures during job processing.
 Provides memory status tracking, garbage collection, and memory-based
 decision making for adaptive processing.
 
-Based on patterns from mcp-zotero-qdrant but generalized for reuse.
+Based on patterns from mcp-scholar but generalized for reuse.
 """
 
 import gc

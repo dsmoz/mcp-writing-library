@@ -2,7 +2,7 @@
 Token-Based Text Chunker
 
 This module provides token-based text chunking with semantic boundary detection.
-Based on the chunking strategy from mcp-zotero-qdrant.
+Based on the chunking strategy from mcp-scholar.
 
 Features:
 - Token-based sizing (default 512 tokens with 50 token overlap)

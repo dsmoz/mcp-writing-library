@@ -4,7 +4,7 @@ File-based Job Queue
 Provides a simple, file-based job queue that works without external dependencies.
 Supports both JSONL format (single file per type) and individual JSON files.
 
-Based on patterns from mcp-zotero-qdrant but generalized for reuse.
+Based on patterns from mcp-scholar but generalized for reuse.
 """
 
 import json
@@ -72,7 +72,7 @@ class JobQueue:
     """
     File-based job queue with thread-safe operations.
 
-    Supports both JSONL format (for mcp-zotero-qdrant compatibility) and
+    Supports both JSONL format (for mcp-scholar compatibility) and
     individual JSON files (for mcp-cerebellum compatibility).
     """
 

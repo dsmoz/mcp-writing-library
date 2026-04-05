@@ -10,7 +10,7 @@ Two approaches are supported:
    - Generates context from document metadata (title, type, tags, date, entities)
    - No LLM required, instant generation
    - Zero hallucination risk - purely factual
-   - Based on mcp-zotero-qdrant's proven approach
+   - Based on mcp-scholar's proven approach
 
 2. **LLM-based context** (SLOW - optional):
    - Uses LLM to generate semantic context per chunk
@@ -68,7 +68,7 @@ def build_metadata_context(
     Build context prefix from document metadata WITHOUT using LLM.
 
     This is the FAST approach - instant generation, zero hallucination risk.
-    Based on mcp-zotero-qdrant's proven methodology.
+    Based on mcp-scholar's proven methodology.
 
     Args:
         title: Document title
