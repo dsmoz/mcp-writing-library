@@ -42,10 +42,12 @@ current_client_id: ContextVar[str | None] = ContextVar("current_client_id", defa
 
 def _client_id(ctx: Context) -> str:
     """Extract client_id from MCP context, middleware ContextVar, or fall back to 'default'."""
-    if ctx is not None and ctx.client_id:
-        return ctx.client_id
-    # Fall back to gateway-injected X-Client-ID (set by middleware)
+    ctx_cid = getattr(ctx, 'client_id', None) if ctx is not None else None
     cv = current_client_id.get()
+    resolved = ctx_cid or cv or "default"
+    print(f"_client_id: ctx.client_id={ctx_cid!r}, contextvar={cv!r}, resolved={resolved!r}", file=sys.stderr)
+    if ctx_cid:
+        return ctx_cid
     return cv if cv else "default"
 
 
