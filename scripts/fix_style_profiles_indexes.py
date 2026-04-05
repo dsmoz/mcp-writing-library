@@ -41,7 +41,7 @@ def main():
 
     for coll in targets:
         print(f"\nFixing indexes on: {coll}")
-        for field in ("name", "channel"):
+        for field in ("name", "channel", "client_id"):
             try:
                 client.create_payload_index(
                     collection_name=coll,
