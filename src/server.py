@@ -78,6 +78,10 @@ class BearerAuthMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
+            # Strip trailing slashes to prevent 307 redirects that break MCP clients
+            path = scope.get("path", "")
+            if path != "/" and path.endswith("/"):
+                scope = dict(scope, path=path.rstrip("/"))
             headers = dict(scope.get("headers", []))
             auth = headers.get(b"authorization", b"").decode()
             token = auth[7:] if auth.startswith("Bearer ") else ""
