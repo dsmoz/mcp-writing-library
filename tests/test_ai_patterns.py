@@ -59,6 +59,47 @@ def test_invalid_language_returns_error():
     assert "language" in result["error"].lower()
 
 
+def test_invalid_threshold_string_returns_error():
+    result = score_ai_patterns("Some text.", threshold="not-a-number")
+    assert result["success"] is False
+    assert "threshold" in result["error"].lower()
+
+
+def test_invalid_threshold_negative_returns_error():
+    result = score_ai_patterns("Some text.", threshold=-0.5)
+    assert result["success"] is False
+    assert "threshold" in result["error"].lower()
+
+
+def test_invalid_threshold_above_one_returns_error():
+    result = score_ai_patterns("Some text.", threshold=1.5)
+    assert result["success"] is False
+    assert "threshold" in result["error"].lower()
+
+
+def test_threshold_none_returns_error():
+    result = score_ai_patterns("Some text.", threshold=None)
+    assert result["success"] is False
+    assert "threshold" in result["error"].lower()
+
+
+def test_threshold_zero_accepted():
+    result = score_ai_patterns("Some text here for testing.", threshold=0.0)
+    assert result["success"] is True
+
+
+def test_threshold_one_accepted():
+    result = score_ai_patterns("Some text here for testing.", threshold=1.0)
+    assert result["success"] is True
+
+
+def test_threshold_string_coerced_to_float():
+    """A numeric string like '0.5' should be coerced to float and accepted."""
+    result = score_ai_patterns("Some text here for testing.", threshold="0.5")
+    assert result["success"] is True
+    assert result["threshold"] == 0.5
+
+
 # ---------------------------------------------------------------------------
 # Clean text
 # ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
+from src.tools.qdrant_errors import handle_qdrant_error
 from src.tools.styles import VALID_STYLES
 from src.tools.registry import VALID_CHANNELS
 
@@ -150,6 +151,10 @@ def save_style_profile(
             "warnings": warnings,
         }
     except Exception as e:
+        col = _style_profiles_collection(client_id)
+        qdrant_result = handle_qdrant_error(e, tool_name="save_style_profile", collection=col, name=name, client_id=client_id)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("Failed to save style profile", name=name, error=str(e))
         capture_tool_error(e, tool_name="save_style_profile", name=name, client_id=client_id)
         return {"success": False, "error": str(e)}
@@ -188,6 +193,10 @@ def load_style_profile(name: str, client_id: str = "default") -> dict:
         payload = results[0].payload or {}
         return {"success": True, "profile": payload}
     except Exception as e:
+        col = _style_profiles_collection(client_id)
+        qdrant_result = handle_qdrant_error(e, tool_name="load_style_profile", collection=col, name=name)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("Failed to load style profile", name=name, error=str(e))
         capture_tool_error(e, tool_name="load_style_profile", name=name)
         return {"success": False, "error": str(e)}
@@ -319,7 +328,9 @@ def update_style_profile(
                 document_id=old_results[0].payload.get("document_id", str(old_results[0].id)),
             )
     except Exception as e:
-        logger.warning("Could not delete old profile vectors", name=name, error=str(e))
+        qdrant_result = handle_qdrant_error(e, tool_name="update_style_profile", collection=_style_profiles_collection(client_id), name=name)
+        if qdrant_result is None:
+            logger.warning("Could not delete old profile vectors", name=name, error=str(e))
 
     # Re-save with merged data
     result = save_style_profile(
@@ -511,6 +522,9 @@ def harvest_corrections_to_profile(
         }
 
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="harvest_corrections_to_profile", collection=_style_profiles_collection(client_id), profile_name=profile_name)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("harvest_corrections_to_profile failed", error=str(e))
         capture_tool_error(e, tool_name="harvest_corrections_to_profile", profile_name=profile_name)
         return {"success": False, "error": str(e)}
@@ -556,6 +570,11 @@ def search_style_profiles(
 
         return {"success": True, "results": results, "total": len(results)}
     except Exception as e:
+        col = _style_profiles_collection(client_id)
+        qdrant_result = handle_qdrant_error(e, tool_name="search_style_profiles", collection=col, client_id=client_id)
+        if qdrant_result is not None:
+            qdrant_result["results"] = []
+            return qdrant_result
         logger.error("Style profile search failed", error=str(e))
         capture_tool_error(e, tool_name="search_style_profiles", client_id=client_id)
         return {"success": False, "error": str(e), "results": []}
@@ -612,6 +631,11 @@ def list_style_profiles(
 
         return {"success": True, "profiles": profiles, "total": len(profiles)}
     except Exception as e:
+        col = _style_profiles_collection(client_id)
+        qdrant_result = handle_qdrant_error(e, tool_name="list_style_profiles", collection=col, client_id=client_id)
+        if qdrant_result is not None:
+            qdrant_result["profiles"] = []
+            return qdrant_result
         logger.error("list_style_profiles failed", error=str(e))
         capture_tool_error(e, tool_name="list_style_profiles", client_id=client_id)
         return {"success": False, "error": str(e), "profiles": []}

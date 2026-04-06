@@ -7,6 +7,7 @@ import structlog
 
 from src.sentry import capture_tool_error
 from src.tools.collections import get_collection_names
+from src.tools.qdrant_errors import handle_qdrant_error
 
 logger = structlog.get_logger(__name__)
 
@@ -136,6 +137,9 @@ def export_library(collection: str, output_format: str = "json", client_id: str 
         }
 
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="export_library", collection=collection_name)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("export_library failed", collection=collection_name, error=str(e))
         capture_tool_error(e, tool_name="export_library", collection=collection_name)
         return {"success": False, "error": str(e)}

@@ -27,6 +27,7 @@ from pathlib import Path
 import structlog
 
 from src.sentry import capture_tool_error
+from src.tools.qdrant_errors import handle_qdrant_error
 
 logger = structlog.get_logger(__name__)
 
@@ -91,9 +92,13 @@ def setup_user_collections(client_id: str = "default") -> dict:
             results[key] = {"collection": collection_name, "status": status}
             logger.info("User collection ready", collection=collection_name, status=status)
         except Exception as e:
-            results[key] = {"collection": collection_name, "status": "error", "error": str(e)}
-            logger.error("User collection setup failed", collection=collection_name, error=str(e))
-            capture_tool_error(e, tool_name="setup_user_collections", collection=collection_name)
+            qdrant_result = handle_qdrant_error(e, tool_name="setup_user_collections", collection=collection_name)
+            if qdrant_result is not None:
+                results[key] = {"collection": collection_name, "status": "error", "error": qdrant_result["error"], "error_type": qdrant_result.get("error_type")}
+            else:
+                results[key] = {"collection": collection_name, "status": "error", "error": str(e)}
+                logger.error("User collection setup failed", collection=collection_name, error=str(e))
+                capture_tool_error(e, tool_name="setup_user_collections", collection=collection_name)
 
     return results
 
@@ -119,9 +124,13 @@ def setup_collections(client_id: str = "default") -> dict:
             results[key] = {"collection": collection_name, "status": status}
             logger.info("Collection ready", collection=collection_name, status=status)
         except Exception as e:
-            results[key] = {"collection": collection_name, "status": "error", "error": str(e)}
-            logger.error("Collection setup failed", collection=collection_name, error=str(e))
-            capture_tool_error(e, tool_name="setup_collections", collection=collection_name)
+            qdrant_result = handle_qdrant_error(e, tool_name="setup_collections", collection=collection_name)
+            if qdrant_result is not None:
+                results[key] = {"collection": collection_name, "status": "error", "error": qdrant_result["error"], "error_type": qdrant_result.get("error_type")}
+            else:
+                results[key] = {"collection": collection_name, "status": "error", "error": str(e)}
+                logger.error("Collection setup failed", collection=collection_name, error=str(e))
+                capture_tool_error(e, tool_name="setup_collections", collection=collection_name)
 
     return results
 

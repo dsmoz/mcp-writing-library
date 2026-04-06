@@ -7,6 +7,7 @@ import structlog
 
 from src.sentry import capture_tool_error
 from src.tools.collections import get_collection_names
+from src.tools.qdrant_errors import handle_qdrant_error
 from src.tools.registry import VALID_DOC_TYPES
 
 logger = structlog.get_logger(__name__)
@@ -151,6 +152,9 @@ def add_template(framework: str, doc_type: str, sections: list) -> dict:
             "section_count": len(normalised),
         }
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="add_template", collection=collection, framework=framework, doc_type=doc_type)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("Failed to add template", error=str(e))
         capture_tool_error(e, tool_name="add_template", framework=framework, doc_type=doc_type)
         return {"success": False, "error": str(e)}
@@ -199,6 +203,9 @@ def check_structure(text: str, framework: str, doc_type: str) -> dict:
             filter_conditions={"framework": framework, "doc_type": doc_type},
         )
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="check_structure", collection=collection, framework=framework, doc_type=doc_type)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("check_structure search failed", error=str(e))
         capture_tool_error(e, tool_name="check_structure", framework=framework, doc_type=doc_type)
         return {"success": False, "error": str(e)}
@@ -386,6 +393,9 @@ def list_templates() -> dict:
         }
 
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="list_templates", collection=collection)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("list_templates failed", error=str(e))
         capture_tool_error(e, tool_name="list_templates")
         return {"success": False, "error": str(e)}

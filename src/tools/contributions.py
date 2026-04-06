@@ -30,6 +30,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
+from src.tools.qdrant_errors import handle_qdrant_error
 
 logger = structlog.get_logger(__name__)
 
@@ -179,6 +180,9 @@ def contribute(
             "submitted_at": now,
         }
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="contribute", collection=_contributions_collection(), target=target, contributed_by=contributed_by)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("Failed to submit contribution", error=str(e))
         capture_tool_error(e, tool_name="contribute", target=target, contributed_by=contributed_by)
         return {"success": False, "error": str(e)}
@@ -259,6 +263,10 @@ def list_contributions(
         return {"success": True, "contributions": contributions, "total": len(contributions)}
 
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="list_contributions", collection=_contributions_collection())
+        if qdrant_result is not None:
+            qdrant_result["contributions"] = []
+            return qdrant_result
         logger.error("list_contributions failed", error=str(e))
         capture_tool_error(e, tool_name="list_contributions")
         return {"success": False, "error": str(e), "contributions": []}
@@ -357,6 +365,9 @@ def review_contribution(
         }
 
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="review_contribution", collection=_contributions_collection(), contribution_id=contribution_id)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("review_contribution failed", error=str(e))
         capture_tool_error(e, tool_name="review_contribution", contribution_id=contribution_id)
         return {"success": False, "error": str(e)}
@@ -374,7 +385,9 @@ def _publish_to_shared(target: str, payload: dict, source_contribution_id: str) 
     try:
         _ensure(collection_name=collection_name, vector_size=VECTOR_SIZE, hybrid=True)
     except Exception as e:
-        logger.warning("ensure_collection failed before publish", collection=collection_name, error=str(e))
+        qdrant_result = handle_qdrant_error(e, tool_name="_publish_to_shared", collection=collection_name)
+        if qdrant_result is None:
+            logger.warning("ensure_collection failed before publish", collection=collection_name, error=str(e))
 
     document_id = str(uuid4())
     payload = dict(payload)
@@ -395,7 +408,11 @@ def _publish_to_shared(target: str, payload: dict, source_contribution_id: str) 
         )
         logger.info("Contribution published to shared collection", target=target, collection=collection_name)
     except Exception as e:
-        logger.error("Failed to publish contribution to shared collection", error=str(e))
+        qdrant_result = handle_qdrant_error(e, tool_name="_publish_to_shared", collection=collection_name, target=target, contribution_id=source_contribution_id)
+        if qdrant_result is not None:
+            logger.error("Qdrant error publishing contribution", error=qdrant_result["error"])
+        else:
+            logger.error("Failed to publish contribution to shared collection", error=str(e))
         capture_tool_error(e, tool_name="_publish_to_shared", target=target, contribution_id=source_contribution_id)
         raise
 

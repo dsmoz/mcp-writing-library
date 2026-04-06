@@ -7,6 +7,7 @@ import structlog
 
 from src.sentry import capture_tool_error
 from src.tools.collections import get_collection_names
+from src.tools.qdrant_errors import handle_qdrant_error
 
 logger = structlog.get_logger(__name__)
 
@@ -86,6 +87,9 @@ def add_rubric_criterion(
             "collection": collection,
         }
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="add_rubric_criterion", collection=collection, framework=framework)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("Failed to add rubric criterion", error=str(e))
         capture_tool_error(e, tool_name="add_rubric_criterion", framework=framework)
         return {"success": False, "error": str(e)}
@@ -136,6 +140,9 @@ def score_against_rubric(
             filter_conditions=filter_conditions,
         )
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="score_against_rubric", collection=collection, framework=framework)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("score_against_rubric search failed", error=str(e))
         capture_tool_error(e, tool_name="score_against_rubric", framework=framework)
         return {"success": False, "error": str(e)}
@@ -241,6 +248,9 @@ def list_rubric_frameworks() -> dict:
         }
 
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="list_rubric_frameworks", collection=collection)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("list_rubric_frameworks failed", error=str(e))
         capture_tool_error(e, tool_name="list_rubric_frameworks")
         return {"success": False, "error": str(e)}

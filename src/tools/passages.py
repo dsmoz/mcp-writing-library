@@ -7,6 +7,7 @@ import structlog
 
 from src.sentry import capture_tool_error
 from src.tools.collections import get_collection_names
+from src.tools.qdrant_errors import handle_qdrant_error
 from src.tools.registry import VALID_DOC_TYPES, VALID_DOMAINS, VALID_LANGUAGES
 from src.tools.styles import VALID_STYLES
 
@@ -99,6 +100,9 @@ def add_passage(
             "warnings": warnings,
         }
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="add_passage", collection=collection, client_id=client_id)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("Failed to add passage", error=str(e))
         capture_tool_error(e, tool_name="add_passage", client_id=client_id)
         return {"success": False, "error": str(e)}
@@ -166,6 +170,10 @@ def search_passages(
 
         return {"success": True, "results": results, "total": len(results)}
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="search_passages", collection=collection, client_id=client_id)
+        if qdrant_result is not None:
+            qdrant_result["results"] = []
+            return qdrant_result
         logger.error("Passage search failed", error=str(e))
         capture_tool_error(e, tool_name="search_passages", client_id=client_id)
         return {"success": False, "error": str(e), "results": []}
@@ -188,6 +196,9 @@ def delete_passage(document_id: str, client_id: str = "default") -> dict:
         delete_document_vectors(collection_name=collection, document_id=document_id)
         return {"success": True, "document_id": document_id, "deleted": True}
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="delete_passage", collection=collection, document_id=document_id)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("Failed to delete passage", error=str(e), document_id=document_id)
         capture_tool_error(e, tool_name="delete_passage", document_id=document_id)
         return {"success": False, "error": str(e)}
@@ -309,9 +320,13 @@ def record_correction(
                 "chunks_created": len(point_ids),
             }
         except Exception as e:
-            logger.error("Failed to record correction", role=role, error=str(e))
-            capture_tool_error(e, tool_name="record_correction", role=role, client_id=client_id)
-            results[role] = {"success": False, "error": str(e)}
+            qdrant_result = handle_qdrant_error(e, tool_name="record_correction", collection=collection, role=role, client_id=client_id)
+            if qdrant_result is not None:
+                results[role] = qdrant_result
+            else:
+                logger.error("Failed to record correction", role=role, error=str(e))
+                capture_tool_error(e, tool_name="record_correction", role=role, client_id=client_id)
+                results[role] = {"success": False, "error": str(e)}
 
     overall_success = all(v.get("success") for v in results.values())
     return {
@@ -458,6 +473,9 @@ def update_passage(
         }
 
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="update_passage", collection=collection, document_id=document_id)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("Failed to update passage", error=str(e), document_id=document_id)
         capture_tool_error(e, tool_name="update_passage", document_id=document_id)
         return {"success": False, "error": str(e)}

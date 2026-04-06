@@ -25,6 +25,7 @@ from typing import List, Optional, Tuple
 import structlog
 
 from src.sentry import capture_tool_error
+from src.tools.qdrant_errors import handle_qdrant_error
 
 logger = structlog.get_logger(__name__)
 
@@ -539,6 +540,14 @@ def score_ai_patterns(
     if language not in ("en", "pt", "auto"):
         return {"success": False, "error": f"Invalid language '{language}'. Must be 'en', 'pt', or 'auto'."}
 
+    # Coerce threshold to float and validate range
+    try:
+        threshold = float(threshold)
+    except (TypeError, ValueError):
+        return {"success": False, "error": f"Invalid threshold '{threshold}'. Must be a number between 0.0 and 1.0."}
+    if not (0.0 <= threshold <= 1.0):
+        return {"success": False, "error": f"Invalid threshold {threshold}. Must be between 0.0 and 1.0."}
+
     if doc_type not in _PARA_LIMITS:
         valid = ", ".join(sorted(_PARA_LIMITS.keys()))
         return {"success": False, "error": f"Invalid doc_type '{doc_type}'. Must be one of: {valid}."}
@@ -749,6 +758,9 @@ def score_semantic_ai_likelihood(
         }
 
     except Exception as e:
+        qdrant_result = handle_qdrant_error(e, tool_name="score_semantic_ai_likelihood", collection=collection)
+        if qdrant_result is not None:
+            return qdrant_result
         logger.error("score_semantic_ai_likelihood failed", error=str(e))
         capture_tool_error(e, tool_name="score_semantic_ai_likelihood")
         return {"success": False, "error": str(e)}
