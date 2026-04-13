@@ -6,7 +6,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
-from src.tools.collections import get_collection_names
+from src.tools.collections import get_collection_names, ensure_user_collections_once
 from src.tools.qdrant_errors import handle_qdrant_error
 from src.tools.registry import VALID_DOC_TYPES, VALID_DOMAINS, VALID_LANGUAGES
 from src.tools.styles import VALID_STYLES
@@ -119,6 +119,7 @@ def search_passages(
     client_id: str = "default",
 ) -> dict:
     """Search for exemplary writing passages by semantic similarity."""
+    ensure_user_collections_once(client_id)
     collection = get_collection_names(client_id)["passages"]
 
     filter_conditions = {}

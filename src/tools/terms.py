@@ -6,7 +6,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
-from src.tools.collections import get_collection_names
+from src.tools.collections import get_collection_names, ensure_user_collections_once
 from src.tools.qdrant_errors import handle_qdrant_error
 from src.tools.registry import VALID_DOMAINS, VALID_LANGUAGES_TERMS as VALID_LANGUAGES
 
@@ -40,6 +40,8 @@ def add_term(
     client_id: str = "default",
 ) -> dict:
     """Store a terminology entry in the user's writing_terms collection."""
+    ensure_user_collections_once(client_id)
+
     if not preferred or not preferred.strip():
         return {"success": False, "error": "preferred term cannot be empty"}
     if domain not in VALID_DOMAINS:

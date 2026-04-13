@@ -214,17 +214,19 @@ def _search_terms_fallback(word: str, language: str) -> list:
 
 
 def suggest_alternatives(
-    word: str,
+    word: Optional[str] = None,
     language: str = "en",
     domain: str = "general",
     context_sentence: Optional[str] = None,  # Reserved for future semantic re-ranking; currently unused
     top_k: int = 5,
+    phrase: Optional[str] = None,  # Alias for word — accepted for backward compatibility
 ) -> dict:
     """
     Look up a word in the thesaurus and return rich alternatives with semantic context.
 
     Falls back to search_terms if the word is not in the thesaurus.
     """
+    word = word or phrase
     if not word or not word.strip():
         return {"success": False, "error": "word cannot be empty"}
     if language not in VALID_LANGUAGES:

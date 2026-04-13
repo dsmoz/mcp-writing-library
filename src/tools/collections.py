@@ -135,6 +135,42 @@ def setup_collections(client_id: str = "default") -> dict:
     return results
 
 
+_initialized_clients: set = set()
+
+
+def ensure_user_collections_once(client_id: str = "default") -> None:
+    """Create per-user Qdrant collections on first call per process per client_id.
+
+    Idempotent: subsequent calls for the same client_id are no-ops.
+    Also ensures the ``entry_type`` payload index exists on the passages collection
+    so that ``score_semantic_ai_likelihood`` filters work without a 400 error.
+    """
+    if client_id in _initialized_clients:
+        return
+
+    setup_user_collections(client_id)
+
+    # Create keyword payload index for entry_type on the passages collection so
+    # filter_conditions={"entry_type": ...} queries don't raise HTTP 400.
+    try:
+        from kbase.vector.sync_client import get_qdrant_client
+        from qdrant_client.models import PayloadSchemaType
+        passages_col = get_user_collection_names(client_id)["passages"]
+        qc = get_qdrant_client()
+        qc.create_payload_index(
+            collection_name=passages_col,
+            field_name="entry_type",
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
+        logger.info("Created entry_type payload index", collection=passages_col)
+    except Exception as e:
+        # Index may already exist (409) — that is fine.
+        if "already exists" not in str(e).lower() and "409" not in str(e):
+            logger.warning("Could not create entry_type index", error=str(e))
+
+    _initialized_clients.add(client_id)
+
+
 def get_stats(client_id: str = "default") -> dict:
     """Return point counts for all collections (user + core)."""
     from kbase.vector.sync_search import get_collection_stats

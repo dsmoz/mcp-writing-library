@@ -10,6 +10,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
+from src.tools.collections import ensure_user_collections_once
 from src.tools.qdrant_errors import handle_qdrant_error
 from src.tools.styles import VALID_STYLES
 from src.tools.registry import VALID_CHANNELS
@@ -596,6 +597,8 @@ def list_style_profiles(
     Returns:
         {success, profiles: [{name, description, channel, style_scores, created_at, document_id}], total}
     """
+    ensure_user_collections_once(client_id)
+
     try:
         client = _get_qdrant_client()
         from qdrant_client.http.models import Filter, FieldCondition, MatchValue
