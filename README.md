@@ -143,6 +143,28 @@ uv run python scripts/seed_from_markdown.py
 uv run python main.py
 ```
 
+## HTTP Authentication (Railway)
+
+`mcp-writing-library` can run behind the gateway **or** be called directly by OAuth clients.
+
+HTTP auth accepts either:
+1. `API_TOKENS` bearer token (existing gateway/admin mode), or
+2. OAuth token validated via `mcp-oauth-server` `/introspect`.
+
+When direct OAuth is used, `client_id` is resolved from introspection and injected into request context (no `X-Client-ID` header required).
+
+```env
+# Existing token mode (optional)
+API_TOKENS=token_a,token_b
+
+# Direct OAuth introspection mode
+OAUTH_ISSUER_URL=https://mcp.dsmozconsultancy.com
+# Optional explicit override:
+# OAUTH_INTROSPECT_URL=https://mcp.dsmozconsultancy.com/introspect
+INTROSPECT_SECRET=your_shared_secret
+OAUTH_INTROSPECT_TIMEOUT=3.0
+```
+
 ## Valid Metadata Values
 
 | Field | Values |
@@ -156,6 +178,7 @@ uv run python main.py
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.7.0 | 2026-04-14 | Direct OAuth token introspection auth for HTTP mode (gateway optional) |
 | 1.6.0 | 2026-04-05 | Railway-ready: X-Client-ID ContextVar, user_id→client_id rename, client_id in payload |
 | 1.5.0 | 2026-04-04 | Remove external KB coupling; admin-guard core writes; restrict export aliases |
 | 1.4.1 | 2026-04-03 | Fix missing `psutil` dependency; restores search_terms, search_thesaurus, get_library_stats |

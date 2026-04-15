@@ -32,6 +32,7 @@ Tools:
 """
 import os
 import sys
+import requests
 from contextvars import ContextVar
 from typing import Optional, List
 from mcp.server.fastmcp import FastMCP, Context
@@ -71,6 +72,48 @@ def _check_auth(token: str) -> bool:
     return token in valid
 
 
+def _oauth_introspect_url() -> str:
+    explicit = os.getenv("OAUTH_INTROSPECT_URL", "").strip()
+    if explicit:
+        return explicit
+    issuer = os.getenv("OAUTH_ISSUER_URL", "").strip().rstrip("/")
+    if issuer:
+        return f"{issuer}/introspect"
+    return ""
+
+
+def _resolve_client_id_by_oauth_token(token: str) -> Optional[str]:
+    """Resolve tenant key via mcp-oauth-server /introspect.
+
+    Prefers ``user_id`` (user-level tenancy, post-multi-device migration) and
+    falls back to ``client_id`` for legacy tokens issued before the migration.
+    """
+    introspect_url = _oauth_introspect_url()
+    introspect_secret = os.getenv("INTROSPECT_SECRET", "").strip()
+    if not token or not introspect_url or not introspect_secret:
+        return None
+    try:
+        timeout_s = float(os.getenv("OAUTH_INTROSPECT_TIMEOUT", "3.0"))
+        resp = requests.post(
+            introspect_url,
+            json={"token": token},
+            headers={"x-introspect-secret": introspect_secret},
+            timeout=timeout_s,
+        )
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        if not payload.get("active"):
+            return None
+        user_id = (payload.get("user_id") or "").strip()
+        if user_id:
+            return user_id
+        client_id = (payload.get("client_id") or "").strip()
+        return client_id or None
+    except Exception:
+        return None
+
+
 class BearerAuthMiddleware:
     """ASGI middleware — validates bearer token and extracts X-Client-ID from gateway."""
     def __init__(self, app):
@@ -85,15 +128,19 @@ class BearerAuthMiddleware:
             headers = dict(scope.get("headers", []))
             auth = headers.get(b"authorization", b"").decode()
             token = auth[7:] if auth.startswith("Bearer ") else ""
-            if not _check_auth(token):
+            oauth_client_id = _resolve_client_id_by_oauth_token(token)
+            if not (_check_auth(token) or oauth_client_id is not None):
                 import json as _json
                 body = _json.dumps({"error": "invalid_token", "error_description": "Authentication required"}).encode()
                 await send({"type": "http.response.start", "status": 401,
                             "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
                 await send({"type": "http.response.body", "body": body})
                 return
-            # Extract client_id from gateway-injected X-Client-ID header
-            client_id_val = headers.get(b"x-client-id", b"").decode() or None
+            # Prefer X-User-ID (user-level tenancy), fall back to X-Client-ID
+            # (legacy, pre-multi-device-migration) or the introspected token.
+            user_id_hdr = headers.get(b"x-user-id", b"").decode().strip()
+            client_id_hdr = headers.get(b"x-client-id", b"").decode().strip()
+            client_id_val = user_id_hdr or client_id_hdr or oauth_client_id
             ctx_token = current_client_id.set(client_id_val)
             try:
                 await self.app(scope, receive, send)

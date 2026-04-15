@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
+## [1.7.0] - 2026-04-14
+
+### Added
+
+- Direct OAuth introspection support in `BearerAuthMiddleware`:
+  - `OAUTH_INTROSPECT_URL` or `OAUTH_ISSUER_URL + /introspect`
+  - `INTROSPECT_SECRET`
+  - optional `OAUTH_INTROSPECT_TIMEOUT`
+
+### Changed
+
+- HTTP auth now accepts either `API_TOKENS` bearer tokens or active OAuth access tokens validated by `mcp-oauth-server`
+- In direct OAuth mode, `client_id` is resolved from introspection response and injected into `current_client_id` ContextVar (no gateway-provided `X-Client-ID` required)
+
 ## [1.6.0] - 2026-04-05
 
 ### Added
