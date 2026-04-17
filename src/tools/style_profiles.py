@@ -83,6 +83,8 @@ def save_style_profile(
     if not rules and not sample_excerpts:
         return {"success": False, "error": "provide at least one rule or sample_excerpt"}
 
+    ensure_user_collections_once(client_id)
+
     # Validate channel
     warnings = []
     if channel is not None and channel not in VALID_CHANNELS:
@@ -174,6 +176,8 @@ def load_style_profile(name: str, client_id: str = "default") -> dict:
     if not name or not name.strip():
         return {"success": False, "error": "name cannot be empty"}
 
+    ensure_user_collections_once(client_id)
+
     try:
         client = _get_qdrant_client()
         from qdrant_client.http.models import Filter, FieldCondition, MatchValue
@@ -239,6 +243,8 @@ def update_style_profile(
         return {"success": False, "error": "name cannot be empty"}
     if not (0.0 < score_weight <= 1.0):
         return {"success": False, "error": "score_weight must be between 0.0 (exclusive) and 1.0"}
+
+    ensure_user_collections_once(client_id)
 
     # Load existing profile
     load_result = load_style_profile(name, client_id=client_id)
@@ -552,6 +558,8 @@ def search_style_profiles(
     """
     if not text or not text.strip():
         return {"success": False, "error": "text cannot be empty"}
+
+    ensure_user_collections_once(client_id)
 
     try:
         filter_conditions = {"channel": channel} if channel else None
