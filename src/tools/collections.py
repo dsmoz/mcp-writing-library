@@ -40,6 +40,15 @@ def _safe_client_id(client_id: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "_", client_id)
 
 
+# Keyword payload indexes required by the tools that filter on them. Qdrant
+# returns HTTP 400 ("Index required but not found") when a filter hits an
+# unindexed field, so we create them eagerly on first use per client_id.
+_PAYLOAD_KEYWORD_INDEXES: dict[str, tuple[str, ...]] = {
+    "passages": ("entry_type", "doc_type", "language", "domain", "rubric_section"),
+    "style_profiles": ("name", "channel"),
+}
+
+
 def get_core_collection_names() -> dict:
     """Return names for shared/core collections (not user-scoped).
 
@@ -138,35 +147,56 @@ def setup_collections(client_id: str = "default") -> dict:
 _initialized_clients: set = set()
 
 
+def _ensure_keyword_index(qc, collection: str, field: str) -> None:
+    """Create a keyword payload index on *field*, tolerating 409 already-exists."""
+    from qdrant_client.models import PayloadSchemaType
+
+    try:
+        qc.create_payload_index(
+            collection_name=collection,
+            field_name=field,
+            field_schema=PayloadSchemaType.KEYWORD,
+        )
+        logger.info("Created keyword payload index", collection=collection, field=field)
+    except Exception as e:
+        msg = str(e).lower()
+        if "already exists" in msg or "409" in msg:
+            return
+        logger.warning(
+            "Could not create payload index",
+            collection=collection,
+            field=field,
+            error=str(e),
+        )
+
+
 def ensure_user_collections_once(client_id: str = "default") -> None:
     """Create per-user Qdrant collections on first call per process per client_id.
 
     Idempotent: subsequent calls for the same client_id are no-ops.
-    Also ensures the ``entry_type`` payload index exists on the passages collection
-    so that ``score_semantic_ai_likelihood`` filters work without a 400 error.
+    Also ensures the keyword payload indexes listed in ``_PAYLOAD_KEYWORD_INDEXES``
+    exist so that filter-based queries do not fail with HTTP 400.
     """
     if client_id in _initialized_clients:
         return
 
     setup_user_collections(client_id)
 
-    # Create keyword payload index for entry_type on the passages collection so
-    # filter_conditions={"entry_type": ...} queries don't raise HTTP 400.
+    # Create keyword payload indexes for every field that tools filter on so
+    # filter_conditions queries don't raise HTTP 400.
     try:
         from kbase.vector.sync_client import get_qdrant_client
-        from qdrant_client.models import PayloadSchemaType
-        passages_col = get_user_collection_names(client_id)["passages"]
+
         qc = get_qdrant_client()
-        qc.create_payload_index(
-            collection_name=passages_col,
-            field_name="entry_type",
-            field_schema=PayloadSchemaType.KEYWORD,
-        )
-        logger.info("Created entry_type payload index", collection=passages_col)
+        user_collections = get_user_collection_names(client_id)
+        for collection_key, fields in _PAYLOAD_KEYWORD_INDEXES.items():
+            collection = user_collections.get(collection_key)
+            if not collection:
+                continue
+            for field in fields:
+                _ensure_keyword_index(qc, collection, field)
     except Exception as e:
-        # Index may already exist (409) — that is fine.
-        if "already exists" not in str(e).lower() and "409" not in str(e):
-            logger.warning("Could not create entry_type index", error=str(e))
+        logger.warning("Could not ensure keyword payload indexes", error=str(e))
 
     _initialized_clients.add(client_id)
 
