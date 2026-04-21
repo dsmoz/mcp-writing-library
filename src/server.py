@@ -32,6 +32,16 @@ from contextvars import ContextVar
 from typing import Optional, List
 from mcp.server.fastmcp import FastMCP, Context
 
+from src.models import (
+    PatternScoreResult,
+    RubricScoreResult,
+    SimilarityResult,
+    StructureCheckResult,
+    StyleProfileSearchResult,
+    VerifyClaimsResult,
+    VocabularyFlagResult,
+)
+
 # ContextVar set by BearerAuthMiddleware from X-Client-ID header (gateway-injected)
 current_client_id: ContextVar[str | None] = ContextVar("current_client_id", default=None)
 
@@ -620,7 +630,7 @@ def check_internal_similarity(
     threshold: float = 0.85,
     top_k_per_sentence: int = 3,
     verdict_threshold_pct: float = 30.0,
-) -> dict:
+) -> SimilarityResult:
     """
     Check if a passage is too similar to content already in the writing library.
 
@@ -658,7 +668,7 @@ def check_external_similarity(
     max_sentences: int = 3,
     verdict_threshold_pct: float = 30.0,
     search_results: Optional[list] = None,
-) -> dict:
+) -> SimilarityResult:
     """
     Check a passage against web content for similarity.
 
@@ -884,7 +894,7 @@ def search_style_profiles(
     ctx: Context,
     top_k: int = 3,
     channel: Optional[str] = None,
-) -> dict:
+) -> StyleProfileSearchResult:
     """
     Find saved style profiles most similar to a writing sample.
 
@@ -998,7 +1008,7 @@ def export_library(collection: str, ctx: Context, output_format: str = "json") -
 def verify_claims(
     text: str,
     domain: str = "general",
-) -> dict:
+) -> VerifyClaimsResult:
     """
     Detect potential hallucinations by checking claim-bearing sentences for
     explicit citation markers. Flags ghost stats (numbers without any source).
@@ -1142,7 +1152,7 @@ def score_against_rubric(
     section: Optional[str] = None,
     top_k: int = 5,
     doc_context: Optional[str] = None,
-) -> dict:
+) -> RubricScoreResult:
     """
     Score a document section against stored evaluation criteria for a given framework.
 
@@ -1242,7 +1252,7 @@ def check_structure(
     text: str,
     framework: str,
     doc_type: str,
-) -> dict:
+) -> StructureCheckResult:
     """
     Check whether a document draft covers all required sections from the stored template.
 
@@ -1366,7 +1376,7 @@ def score_writing_patterns(
     doc_type: Optional[str] = None,
     threshold: float = 0.25,
     top_k: int = 10,
-) -> dict:
+) -> PatternScoreResult:
     """
     Score text against craft patterns. Single entry point for all five scoring modes.
 
@@ -1555,7 +1565,7 @@ def flag_vocabulary(
     text: str,
     language: str = "en",
     domain: str = "general",
-) -> dict:
+) -> VocabularyFlagResult:
     """
     Scan text for AI-pattern vocabulary headwords present in the thesaurus.
 
