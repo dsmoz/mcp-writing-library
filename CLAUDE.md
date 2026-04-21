@@ -43,12 +43,12 @@ Write operations on core/shared collections (`add_rubric_criterion`, `add_templa
 | `src/tools/passages` | `add_passage`, `search_passages`, `update_passage`, `delete_passage`, `batch_add_passages` | Store and retrieve exemplary writing passages (per-user) |
 | `src/tools/terms` | `add_term`, `search_terms`, `update_term`, `delete_term`, `batch_add_terms` | Store and retrieve terminology dictionary entries (per-user) |
 | `src/tools/collections` | `get_collection_names`, `get_user_collection_names`, `get_core_collection_names`, `setup_collections`, `setup_user_collections`, `get_stats` | Manage Qdrant collections; client_id-aware |
-| `src/tools/contributions` | `contribute`, `contribute_term`, `contribute_thesaurus_entry`, `contribute_rubric`, `contribute_template`, `list_contributions`, `review_contribution` | Moderation queue for user contributions to shared collections |
+| `src/tools/contributions` | `contribute`, `list_contributions`, `review_contribution` | Moderation queue; non-admin `add_term/add_thesaurus_entry/add_rubric_criterion/add_template` calls are auto-routed here |
 | `src/tools/export` | `export_library` | Export any collection to JSON or CSV |
 | `src/tools/styles` | `list_styles` | Writing style registry (14 labels across 4 categories) |
-| `src/tools/plagiarism` | `check_internal_similarity`, `check_external_similarity`, `score_external_similarity` | Similarity detection against library and web |
+| `src/tools/plagiarism` | `check_internal_similarity`, `check_external_similarity` | Similarity detection against library and web (pass `search_results` to score pre-fetched results) |
 | `src/tools/style_profiles` | `save_style_profile`, `load_style_profile`, `update_style_profile`, `search_style_profiles`, `list_style_profiles`, `harvest_corrections_to_profile` | Extract and retrieve writing style profiles from samples; channel-tagged |
-| `src/tools/ai_patterns` | `score_ai_patterns` | Detect AI writing patterns; 10 rule-based detectors; calibrated by `doc_type` |
+| `src/tools/ai_patterns` (+ poetry/song/fiction) | `score_writing_patterns` | Unified craft scorer; `mode ∈ {ai, semantic-ai, poetry, song, fiction}` |
 | `src/tools/thesaurus` | `add_thesaurus_entry`, `search_thesaurus`, `suggest_alternatives`, `flag_vocabulary` | Vocabulary intelligence: flag AI-pattern words, suggest naturalistic alternatives (EN + PT) |
 | `src/tools/evidence` | `verify_claims`, `score_evidence_density` | Citation-based claim verification, ghost-stat detection, evidence density scoring |
 | `src/tools/rubrics` | `add_rubric_criterion`, `score_against_rubric`, `list_rubric_donors` | Donor rubric alignment; USAID/UNDP/GF/EU/general criteria |
@@ -135,19 +135,31 @@ all_profiles = list_style_profiles()
 linkedin_profiles = list_style_profiles(channel="linkedin")
 ```
 
-## Pattern 5 — AI Pattern Scoring with doc_type
+## Pattern 5 — Craft Pattern Scoring (unified)
 
-Pass `doc_type` to calibrate paragraph-length and discursive-deficit thresholds:
+`score_writing_patterns` is the single entry point for all craft scorers.
+Select the detector with `mode`:
+
+| mode | What it checks | `doc_type` default |
+|------|---------------|--------------------|
+| `ai` | 10 rule-based AI-writing patterns (paragraph length, discursive deficit, etc.) | `general` |
+| `semantic-ai` | Similarity to the user's own library of known-AI passages | — (uses `top_k`) |
+| `poetry` | Poetry craft heuristics | `free-verse` |
+| `song` | Song-lyric craft heuristics | `pop-song` |
+| `fiction` | Prose-fiction craft heuristics | `short-story` |
 
 ```python
-result = score_ai_patterns(
+result = score_writing_patterns(
     text="...",
+    mode="ai",
     language="auto",
-    doc_type="monitoring-report",  # relaxes paragraph limit to 7, discursive target to 0.5
-    # doc_type options: concept-note|full-proposal|eoi|executive-summary|general|
-    #                   annual-report|monitoring-report|financial-report|assessment|tor|governance-review
+    doc_type="monitoring-report",  # ai/poetry/song/fiction only; ignored for semantic-ai
+    # ai doc_type options: concept-note|full-proposal|eoi|executive-summary|general|
+    #                      annual-report|monitoring-report|financial-report|assessment|tor|governance-review
 )
 ```
+
+Invalid `mode` returns `{"success": False, "error": "Invalid mode ..."}`.
 
 ## Pattern 6 — Evidence Verification
 
@@ -207,7 +219,7 @@ result = suggest_alternatives(word="leverage", language="en", domain="governance
 result = suggest_alternatives(word="alavancar", language="pt", domain="general")
 ```
 
-`flag_vocabulary` complements `score_ai_patterns` (structural patterns) with lexical flagging.
+`flag_vocabulary` complements `score_writing_patterns(mode="ai")` (structural patterns) with lexical flagging.
 `suggest_alternatives` falls back to `search_terms` when word is not in the thesaurus.
 
 ## Common Pitfalls
