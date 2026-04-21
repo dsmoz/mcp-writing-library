@@ -1,34 +1,29 @@
 """
 MCP Writing Library Server — FastMCP tool definitions.
 
-Tools:
-    search_passages          — semantic search for exemplary writing passages
-    add_passage              — store a new exemplary passage
-    delete_passage           — delete a passage by document_id
-    update_passage           — update fields of an existing passage
-    list_styles              — list all valid writing style labels
-    search_terms             — semantic search in terminology dictionary
-    add_term                 — add a new terminology entry
-    delete_term              — delete a term by document_id
-    update_term              — update fields of an existing term
-    get_library_stats        — collection point counts
-    setup_collections        — create/verify Qdrant collections (admin)
-    check_internal_similarity — detect similarity against library passages
-    check_external_similarity — detect similarity against web content (Tavily)
-    score_external_similarity — score pre-fetched search results for similarity
-    score_ai_patterns        — score text against known AI writing patterns
-    score_poetry_patterns    — score a poem against poetry-specific craft patterns
-    score_song_patterns      — score song lyrics against songwriting-specific patterns
-    score_fiction_patterns   — score prose fiction against fiction-specific craft patterns
-    add_rubric_criterion     — store an evaluation criterion for any framework
-    score_against_rubric     — score text against stored criteria for a framework
-    list_rubric_frameworks   — list frameworks with stored rubric criteria
-    score_voice_consistency  — measure consistency of voice across sections
-    detect_authorship_shift  — flag segments deviating stylistically from the majority
-    suggest_alternatives     — rich alternatives for a word with meaning, register, and usage context
-    add_thesaurus_entry      — add a new AI-pattern word to the thesaurus
-    search_thesaurus         — semantic search across thesaurus entries
-    flag_vocabulary          — scan text for AI-pattern vocabulary headwords
+Tools (see Patterns 1–9 in CLAUDE.md for chained workflows):
+
+    Passages (per-user):
+        search_passages, add_passage, update_passage, delete_passage, batch_add_passages
+    Terminology (per-user; add_term routes share→library|queue|personal):
+        search_terms, add_term, update_term, delete_term, batch_add_terms, record_correction
+    Style profiles (per-user, channel-tagged):
+        save_style_profile, load_style_profile, update_style_profile,
+        search_style_profiles, list_style_profiles, harvest_corrections_to_profile
+    Thesaurus (shared, admin-write; non-admin calls route to contribution queue):
+        add_thesaurus_entry, search_thesaurus, suggest_alternatives, flag_vocabulary
+    Rubrics & templates (shared, admin-write; non-admin calls route to queue):
+        add_rubric_criterion, score_against_rubric, list_rubric_frameworks,
+        add_template, check_structure, list_templates
+    Similarity & craft:
+        check_internal_similarity (library), check_external_similarity (web via Tavily),
+        score_writing_patterns (mode ∈ {ai, semantic-ai, poetry, song, fiction})
+    Evidence & voice:
+        verify_claims, score_evidence_density,
+        score_voice_consistency, detect_authorship_shift
+    Infrastructure:
+        list_styles, get_library_stats, setup_collections (admin),
+        export_library, list_contributions, review_contribution (admin)
 """
 import os
 import sys
@@ -152,11 +147,28 @@ class BearerAuthMiddleware:
 
 def _build_mcp() -> FastMCP:
     transport = os.getenv("TRANSPORT", "stdio")
+    instructions = (
+        "Writing-quality, evidence, and document-intelligence tools backed by Qdrant.\n\n"
+        "Key workflows (see CLAUDE.md Patterns 1–9 for full examples):\n"
+        "  1. Vocabulary review: search_terms → apply preferred term with `why` as rationale.\n"
+        "  2. Seed model passages: check_internal_similarity (verdict='clean') → add_passage.\n"
+        "  3. Similarity before adding: always check_internal_similarity first.\n"
+        "  4. Style profile extraction: list_styles → save_style_profile (channel-tagged).\n"
+        "  5. Craft scoring (unified): score_writing_patterns with mode∈{ai|semantic-ai|poetry|song|fiction}.\n"
+        "  6. Evidence verification: verify_claims (ghost_stat=True always blocks) + score_evidence_density.\n"
+        "  7. Rubric alignment: score_against_rubric (usaid|undp|global-fund|eu|general).\n"
+        "  8. Structure check: check_structure (retrieves stored template, flags missing sections).\n"
+        "  9. Vocabulary flagging: flag_vocabulary for lexical AI tells; suggest_alternatives for rich swaps.\n\n"
+        "Tenancy: per-user collections ({client_id}_writing_*) are isolated; thesaurus/rubrics/templates/terms_shared "
+        "are shared. add_term/add_thesaurus_entry/add_rubric_criterion/add_template route share→library|queue|personal "
+        "based on ADMIN_CLIENT_ID. Use check_internal_similarity for your own library, check_external_similarity "
+        "to scan the public web via Tavily."
+    )
     if transport == "http":
         host = os.getenv("HOST", "0.0.0.0")
         port = int(os.getenv("PORT", "8000"))
-        return FastMCP("writing-library", host=host, port=port)
-    return FastMCP("writing-library")
+        return FastMCP("writing-library", host=host, port=port, instructions=instructions)
+    return FastMCP("writing-library", instructions=instructions)
 
 mcp = _build_mcp()
 
@@ -310,31 +322,100 @@ def add_term(
     why: str = "",
     example_bad: str = "",
     example_good: str = "",
+    share: bool = False,
+    note: str = "",
 ) -> dict:
     """
-    Add a terminology entry to the dictionary.
+    Add a terminology entry.
 
-    Use this to codify vocabulary preferences — consultant language, UNDP standards,
-    people-first terminology, or sector-specific expressions.
+    By default (share=False), the entry is written to the caller's personal
+    dictionary. Pass share=True to contribute to the shared library: admins
+    write directly, non-admins submit to the moderation queue.
 
     Args:
         preferred: The term to use (e.g. "rights-holder", "key populations")
         avoid: Term to avoid (e.g. "victim", "vulnerable groups")
         domain: Thematic area: srhr|governance|climate|general|m-and-e
         language: Language: en|pt|both
-        why: Reason for preference (e.g. "deficit framing; UNDP 2024 standard")
+        why: Reason for preference
         example_bad: Example of poor usage
         example_good: Example of correct usage
+        share: If True, target the shared library (direct for admins, queue for others).
+               If False (default), target the caller's personal dictionary.
+        note: Optional note for moderators (only used for queued contributions).
 
     Returns:
-        document_id on success
+        Includes routed_to: "personal" | "library" | "queue".
     """
-    from src.tools.terms import add_term as _add
-    return _add(
-        preferred=preferred, avoid=avoid, domain=domain, language=language,
-        why=why, example_bad=example_bad, example_good=example_good,
-        client_id=_client_id(ctx),
+    caller = _client_id(ctx)
+
+    if not share:
+        from src.tools.terms import add_term as _add
+        result = _add(
+            preferred=preferred, avoid=avoid, domain=domain, language=language,
+            why=why, example_bad=example_bad, example_good=example_good,
+            client_id=caller,
+        )
+        if result.get("success"):
+            result["routed_to"] = "personal"
+        return result
+
+    # share=True
+    if _require_admin(ctx) is None:
+        from uuid import uuid4
+        from src.tools.collections import get_core_collection_names
+        from src.tools.registry import VALID_DOMAINS
+        if domain not in VALID_DOMAINS:
+            return {"success": False, "error": f"Invalid domain '{domain}'. Must be one of: {sorted(VALID_DOMAINS)}"}
+        if not preferred or not preferred.strip():
+            return {"success": False, "error": "preferred term cannot be empty"}
+        try:
+            from kbase.vector.sync_indexing import index_document
+        except ImportError:
+            return {"success": False, "error": "kbase indexing unavailable"}
+        collection = get_core_collection_names().get("terms_shared", "writing_terms_shared")
+        document_id = str(uuid4())
+        content_parts = [
+            f"Preferred term: {preferred}",
+            f"Avoid: {avoid}" if avoid else "",
+            f"Why: {why}" if why else "",
+            f"Bad example: {example_bad}" if example_bad else "",
+            f"Good example: {example_good}" if example_good else "",
+            f"Domain: {domain}",
+            f"Language: {language}",
+        ]
+        content = "\n".join(p for p in content_parts if p)
+        metadata = {
+            "client_id": "shared", "preferred": preferred, "avoid": avoid,
+            "domain": domain, "language": language, "why": why,
+            "example_bad": example_bad, "example_good": example_good,
+            "entry_type": "term", "contributed_by": caller,
+        }
+        try:
+            point_ids = index_document(
+                collection_name=collection, document_id=document_id,
+                title=preferred, content=content, metadata=metadata,
+                context_mode="metadata",
+            )
+            return {
+                "success": True, "document_id": document_id,
+                "chunks_created": len(point_ids), "collection": collection,
+                "routed_to": "library",
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # share=True + non-admin → queue
+    from src.tools.contributions import contribute_term as _contribute
+    result = _contribute(
+        preferred=preferred, contributed_by=caller, avoid=avoid, domain=domain,
+        language=language, why=why, example_bad=example_bad,
+        example_good=example_good, note=note,
     )
+    if result.get("success"):
+        _notify_contribution(result.get("contribution_id", ""), "terms", preferred, caller)
+        result["routed_to"] = "queue"
+    return result
 
 
 @mcp.tool()
@@ -521,7 +602,7 @@ def get_library_stats(ctx: Context) -> dict:
 @mcp.tool()
 def setup_collections(ctx: Context) -> dict:
     """
-    Create or verify Qdrant collections for the writing library.
+    **Admin only.** Create or verify Qdrant collections for the writing library.
 
     Run this once on first setup, or to verify collections exist after a Qdrant restart.
 
@@ -543,8 +624,12 @@ def check_internal_similarity(
     """
     Check if a passage is too similar to content already in the writing library.
 
-    Splits the text into sentences and searches each against the writing_passages
-    collection. Useful for deduplication before adding new passages.
+    Use this when deduplicating before adding a passage, or when auditing a draft
+    for accidental self-plagiarism against previously-stored content. Splits the
+    text into sentences and searches each against the writing_passages collection.
+
+    Use `check_internal_similarity` for your own library; use
+    `check_external_similarity` to scan the public web via Tavily.
 
     Args:
         text: The passage to check
@@ -572,25 +657,41 @@ def check_external_similarity(
     threshold: float = 0.75,
     max_sentences: int = 3,
     verdict_threshold_pct: float = 30.0,
+    search_results: Optional[list] = None,
 ) -> dict:
     """
-    Search the web for content similar to the given text using the Tavily API.
+    Check a passage against web content for similarity.
 
-    Requires TAVILY_API_KEY in the environment. If not set, returns key sentences
-    and fallback instructions for manual search via mcp__MCP_DOCKER__tavily_search,
-    followed by a call to score_external_similarity().
+    Use `check_external_similarity` for web/public-internet comparisons; use
+    `check_internal_similarity` to compare against your own library first.
+
+    Default mode (search_results=None): fetches web results via the Tavily API
+    (requires TAVILY_API_KEY) and scores them against the text. If the API key
+    is missing, returns fallback instructions for manual search.
+
+    Scoring mode (search_results provided): skips the web fetch and scores the
+    supplied Tavily-style results directly — use this after manually calling
+    mcp__MCP_DOCKER__tavily_search when no API key is configured.
 
     Args:
         text: The passage to check
         threshold: Cosine similarity threshold to flag a match (default 0.75)
-        max_sentences: Number of key sentences to search (default 3, reduces API usage)
-        verdict_threshold_pct: % of sentences flagged to trigger overall "flagged" verdict (default 30)
+        max_sentences: Number of key sentences to search (default 3)
+        verdict_threshold_pct: % of sentences flagged to trigger "flagged" verdict (default 30)
+        search_results: Optional pre-fetched list of {url, content, title} dicts.
+                        If provided, web search is skipped.
 
     Returns:
-        overall_similarity_pct, verdict (clean|flagged), and list of flagged sentences
-        with their web sources (url, title, score, snippet).
-        If TAVILY_API_KEY is missing: success=False with key_sentences and fallback_instructions.
+        overall_similarity_pct, verdict (clean|flagged), flagged sentences with sources.
     """
+    if search_results is not None:
+        from src.tools.plagiarism import score_external_similarity as _score
+        return _score(
+            text=text,
+            search_results=search_results,
+            threshold=threshold,
+            verdict_threshold_pct=verdict_threshold_pct,
+        )
     from src.tools.plagiarism import check_external_similarity as _check
     return _check(
         text=text,
@@ -830,37 +931,6 @@ def list_style_profiles(
 
 
 @mcp.tool()
-def score_external_similarity(
-    text: str,
-    search_results: list,
-    threshold: float = 0.75,
-    verdict_threshold_pct: float = 30.0,
-) -> dict:
-    """
-    Score similarity between text and pre-fetched web search results.
-
-    Use this after manually searching with mcp__MCP_DOCKER__tavily_search
-    when TAVILY_API_KEY is not configured. Pass search results directly.
-
-    Args:
-        text: The original text to check
-        search_results: List of {url, content, title} dicts from Tavily search
-        threshold: Cosine similarity threshold (default 0.75)
-        verdict_threshold_pct: % of sentences flagged to trigger "flagged" verdict (default 30)
-
-    Returns:
-        overall_similarity_pct, verdict (clean|flagged), and flagged sentences with web sources
-    """
-    from src.tools.plagiarism import score_external_similarity as _score
-    return _score(
-        text=text,
-        search_results=search_results,
-        threshold=threshold,
-        verdict_threshold_pct=verdict_threshold_pct,
-    )
-
-
-@mcp.tool()
 def batch_add_passages(items: list[dict], ctx: Context) -> dict:
     """
     Add multiple writing passages in a single call.
@@ -933,7 +1003,9 @@ def verify_claims(
     Detect potential hallucinations by checking claim-bearing sentences for
     explicit citation markers. Flags ghost stats (numbers without any source).
 
-    Fully self-contained — no external knowledge-base dependencies.
+    Use this when auditing a draft before submission, or when triaging AI-generated
+    prose for unsourced numeric claims. Ghost stats (verdict flag) should always
+    block publication. Fully self-contained — no external knowledge-base dependencies.
 
     Extracts sentences that contain statistics, causal assertions, epistemic
     verbs, citation placeholders, or country/prevalence keywords, then checks
@@ -1016,15 +1088,18 @@ def add_rubric_criterion(
     criterion: str,
     weight: float = 1.0,
     red_flags: Optional[List[str]] = None,
+    note: str = "",
 ) -> dict:
     """
-    Store an evaluation criterion in the rubric library (admin only).
+    **Admin only** for direct writes; non-admins are auto-routed to the review queue.
+    Store an evaluation criterion in the rubric library.
+
+    Admins write directly to the shared rubric collection (routed_to="library").
+    Non-admin callers are routed to the moderation queue (routed_to="queue").
 
     Use this to build up evaluation criteria for any framework — donor proposals
     (usaid, undp, global-fund), client deliverables (lambda, oca-2025), or
     internal standards (ds-moz-editorial). Score later with score_against_rubric().
-
-    Non-admin users should use contribute_rubric() to submit criteria for review.
 
     Args:
         framework: Evaluation framework slug — any lowercase slug (e.g. "usaid", "undp", "lambda", "oca-2025")
@@ -1032,16 +1107,32 @@ def add_rubric_criterion(
         criterion: The criterion description (what evaluators look for)
         weight: Relative importance 0.1–2.0 (default 1.0). Higher = more important criterion.
         red_flags: Phrases or patterns that evaluators penalise (optional)
+        note: Optional free-text note stored with queued contributions (non-admin only)
 
     Returns:
-        {success, document_id, chunks_created, collection} on success,
-        or {success: False, error} on empty framework or empty criterion
+        {success, routed_to: "library"|"queue", ...} — shape varies by route.
     """
-    err = _require_admin(ctx)
-    if err:
-        return {"success": False, "error": err}
-    from src.tools.rubrics import add_rubric_criterion as _add
-    return _add(framework=framework, section=section, criterion=criterion, weight=weight, red_flags=red_flags)
+    caller = _client_id(ctx)
+    if _require_admin(ctx) is None:
+        from src.tools.rubrics import add_rubric_criterion as _add
+        result = _add(framework=framework, section=section, criterion=criterion, weight=weight, red_flags=red_flags)
+        if result.get("success"):
+            result["routed_to"] = "library"
+        return result
+    from src.tools.contributions import contribute_rubric as _contribute
+    result = _contribute(
+        framework=framework,
+        section=section,
+        criterion=criterion,
+        contributed_by=caller,
+        weight=weight,
+        red_flags=red_flags,
+        note=note,
+    )
+    if result.get("success"):
+        _notify_contribution(result.get("contribution_id", ""), "rubrics", f"{framework}/{section}", caller)
+        result["routed_to"] = "queue"
+    return result
 
 
 @mcp.tool()
@@ -1055,8 +1146,10 @@ def score_against_rubric(
     """
     Score a document section against stored evaluation criteria for a given framework.
 
-    Retrieves the most relevant criteria for the framework (and optionally section),
-    computes a weighted semantic similarity score, and returns a verdict.
+    Use this when pre-screening a proposal or report against donor rubrics before
+    submission (USAID, UNDP, Global Fund, EU, or custom frameworks). Retrieves the
+    most relevant criteria, computes a weighted semantic similarity score, and
+    returns a strong/adequate/weak verdict.
 
     Args:
         text: Document section to score
@@ -1097,15 +1190,18 @@ def add_template(
     framework: str,
     doc_type: str,
     sections: List[dict],
+    note: str = "",
 ) -> dict:
     """
-    Store a document template (list of required sections) for a framework and document type (admin only).
+    **Admin only** for direct writes; non-admins are auto-routed to the review queue.
+    Store a document template (list of required sections) for a framework and document type.
+
+    Admins write directly to the shared template collection (routed_to="library").
+    Non-admin callers are routed to the moderation queue (routed_to="queue").
 
     Use this to define the expected structure of documents for any framework — donor proposals
     (usaid, undp), client deliverables (lambda, oca-2025), or internal standards. Once stored,
     use check_structure() to verify a draft covers all required sections.
-
-    Non-admin users should use contribute_template() to submit templates for review.
 
     Args:
         framework: Evaluation framework slug — any lowercase slug (e.g. "undp", "lambda", "ds-moz")
@@ -1115,16 +1211,30 @@ def add_template(
                   - description (str): What this section should contain
                   - required (bool, optional): Whether mandatory (default True)
                   - order (int, optional): Expected position 1-based (default = list index + 1)
+        note: Optional free-text note stored with queued contributions (non-admin only)
 
     Returns:
-        {success, document_id, chunks_created, framework, doc_type, section_count} on success,
-        or {success: False, error} on invalid input
+        {success, routed_to: "library"|"queue", ...} — shape varies by route.
     """
-    err = _require_admin(ctx)
-    if err:
-        return {"success": False, "error": err}
-    from src.tools.templates import add_template as _add
-    return _add(framework=framework, doc_type=doc_type, sections=sections)
+    caller = _client_id(ctx)
+    if _require_admin(ctx) is None:
+        from src.tools.templates import add_template as _add
+        result = _add(framework=framework, doc_type=doc_type, sections=sections)
+        if result.get("success"):
+            result["routed_to"] = "library"
+        return result
+    from src.tools.contributions import contribute_template as _contribute
+    result = _contribute(
+        framework=framework,
+        doc_type=doc_type,
+        sections=sections,
+        contributed_by=caller,
+        note=note,
+    )
+    if result.get("success"):
+        _notify_contribution(result.get("contribution_id", ""), "templates", f"{framework}/{doc_type}", caller)
+        result["routed_to"] = "queue"
+    return result
 
 
 @mcp.tool()
@@ -1136,8 +1246,10 @@ def check_structure(
     """
     Check whether a document draft covers all required sections from the stored template.
 
-    Retrieves the stored template for the framework+doc_type pair and evaluates each section's
-    presence in the draft using semantic similarity (with keyword fallback).
+    Use this when a draft needs a structural completeness check — before review,
+    submission, or as a quick TOC audit. Retrieves the stored template for the
+    framework+doc_type pair and evaluates each section's presence in the draft
+    using semantic similarity (with keyword fallback).
 
     Args:
         text: The document draft text to check
@@ -1178,6 +1290,10 @@ def score_voice_consistency(
 ) -> dict:
     """
     Measure how consistently a list of text sections share a voice/style.
+
+    Use this when reviewing a multi-author draft (proposal chapters, merged sections)
+    for voice drift, or when validating that a ghost-written section matches a saved
+    author profile.
 
     Given 2–20 sections (e.g. proposal chapters written by different authors),
     computes pairwise similarity between sections and optionally scores each
@@ -1242,175 +1358,69 @@ def detect_authorship_shift(
 
 
 @mcp.tool()
-def score_semantic_ai_likelihood(text: str, ctx: Context, top_k: int = 10) -> dict:
-    """
-    Score how semantically similar text is to AI-corrected vs. human-corrected passages.
-
-    Complements score_ai_patterns() — where that tool catches known patterns by regex,
-    this tool catches novel AI-like prose by comparing embeddings against the correction
-    corpus built up through record_correction() calls.
-
-    Requires at least one passage stored with each label ('ai-corrected', 'human-corrected').
-    Returns method='insufficient_data' with a note when the corpus is too small.
-
-    Args:
-        text: The passage to score
-        top_k: Neighbours to retrieve per sub-corpus (default 10)
-
-    Returns:
-        {success, likelihood (0–1), verdict (human-like|ambiguous|ai-like),
-         ai_mean_similarity, human_mean_similarity, ai_sample_count,
-         human_sample_count, method ("semantic"|"insufficient_data")}
-    """
-    from src.tools.ai_patterns import score_semantic_ai_likelihood as _score
-    return _score(text=text, top_k=top_k, client_id=_client_id(ctx))
-
-
-@mcp.tool()
-def score_ai_patterns(
+def score_writing_patterns(
     text: str,
+    mode: str,
+    ctx: Context,
     language: str = "auto",
+    doc_type: Optional[str] = None,
     threshold: float = 0.25,
-    doc_type: str = "general",
+    top_k: int = 10,
 ) -> dict:
     """
-    Score text against known AI writing patterns.
+    Score text against craft patterns. Single entry point for all five scoring modes.
 
-    Returns overall score (0.0=human, 1.0=AI), per-category findings, and a verdict.
-    Use before delivery to identify and fix AI-sounding patterns.
+    Use this to detect AI-writing tells, semantic overlap with known-AI passages, or
+    craft issues in poetry/song/fiction drafts — dispatch via `mode`.
 
-    Categories scored:
-        connector_repetition  — Overused connectors: Furthermore, Additionally, Moreover
-        hollow_intensifiers   — "It is important to note that", "It is crucial that"
-        grandiose_openers     — Dramatic paragraph openings typical of AI prose
-        em_dash_intercalation — Paired em-dashes used as parenthetical inserts (AI pattern)
-        sentence_monotony     — 3+ consecutive sentences of similar length (±3 words)
-        passive_voice         — High passive voice density (>25% of sentences)
-        paragraph_length      — Paragraphs exceeding configurable per doc_type (default: 5)
-        discursive_deficit    — Fewer than configurable per doc_type (default: 1.0/page) discursive expressions
-        mechanical_listing    — Paragraph openers: Firstly, Secondly, Thirdly, Finally
-        generic_closings      — "In conclusion, this report has shown...", etc.
-
-    Args:
-        text: The text to score (full document or section)
-        language: "en", "pt", or "auto" (default: auto-detect)
-        threshold: Per-category score above which a category is flagged (default: 0.25)
-        doc_type: Document type for threshold calibration. One of: concept-note, full-proposal,
-                  eoi, executive-summary, general, annual-report, monitoring-report, financial-report,
-                  assessment, tor, governance-review. Default: "general".
-
-    Returns:
-        dict with overall_score, verdict (clean|review|ai-sounding), per-category
-        scores and findings with exact excerpts, summary, word_count, page_equivalent, doc_type.
-        Verdict thresholds: clean <0.25 | review 0.25–0.55 | ai-sounding ≥0.55
-    """
-    from src.tools.ai_patterns import score_ai_patterns as _score
-    return _score(text=text, language=language, threshold=threshold, doc_type=doc_type)
-
-
-@mcp.tool()
-def score_poetry_patterns(
-    text: str,
-    doc_type: str = "free-verse",
-    language: str = "auto",
-    threshold: float = 0.25,
-) -> dict:
-    """
-    Score a poem against poetry-specific craft patterns.
-
-    Use this instead of score_ai_patterns for poetry — it checks form-appropriate
-    patterns rather than document prose patterns.
-
-    Categories scored:
-        rhyme_scheme_regularity   — Sonnet ABAB/couplet and villanelle ABA refrains (N/A for other forms)
-        meter_regularity          — Syllable-count variance; strict for haiku (5-7-5) and sonnet (~10±2)
-        stanza_length_consistency — Flags stanzas with dramatically different line counts
-        line_ending_cliche        — Overused end-words: heart, soul, moon, tears, fire, etc.
-        prose_intrusion           — Lines >12 words with subordinating conjunction + finite verb
-        forced_rhyme_flag         — Inverted syntax suggesting rhyme-forced phrasing
+    Modes:
+        ai           — Known AI prose patterns (connectors, hollow intensifiers, em-dash intercalation,
+                       passive voice, paragraph length, discursive deficit, etc.).
+                       doc_type: concept-note|full-proposal|eoi|executive-summary|general|annual-report|
+                                 monitoring-report|financial-report|assessment|tor|governance-review (default: general)
+        semantic-ai  — Embedding-similarity to the user's ai-corrected vs human-corrected corpus.
+                       Requires record_correction() calls to build the corpus first.
+                       Uses top_k for neighbours per sub-corpus. Ignores doc_type/threshold/language.
+        poetry       — Poem-specific craft (rhyme, meter, stanza consistency, line-ending clichés, etc.).
+                       doc_type: haiku|sonnet|free-verse|villanelle|spoken-word (default: free-verse)
+        song         — Lyric-specific craft (verse/chorus structure, hook repetition, singability, etc.).
+                       doc_type: pop-song|ballad|rap-verse|hymn|jingle (default: pop-song)
+        fiction      — Prose-fiction craft (show-vs-tell, dialogue tags, adverb overload, purple prose).
+                       doc_type: novel-chapter|short-story|flash-fiction|screenplay|creative-nonfiction
+                                 (default: short-story)
 
     Args:
-        text: The poem text
-        doc_type: haiku|sonnet|free-verse|villanelle|spoken-word (default: free-verse)
-        language: en|pt|auto (default: auto)
-        threshold: Per-category score above which a category is flagged (default: 0.25)
+        text: The text to score
+        mode: ai|semantic-ai|poetry|song|fiction
+        language: "en", "pt", or "auto" (ignored by semantic-ai)
+        doc_type: Mode-specific document/form type (see per-mode defaults above)
+        threshold: Per-category score above which a category is flagged (ignored by semantic-ai)
+        top_k: Neighbours per sub-corpus (semantic-ai only)
 
     Returns:
-        overall_score, verdict (clean|review|craft-issue), per-category scores and findings,
-        line_count, stanza_count, word_count, doc_type
+        Mode-specific result dict. See the underlying helpers for shape.
+        For ai/poetry/song/fiction: overall_score, verdict, per-category scores, counts, doc_type.
+        For semantic-ai: likelihood, verdict, mean-similarity stats, sample counts, method.
     """
-    from src.tools.poetry_patterns import score_poetry_patterns as _score
-    return _score(text=text, doc_type=doc_type, language=language, threshold=threshold)
-
-
-@mcp.tool()
-def score_song_patterns(
-    text: str,
-    doc_type: str = "pop-song",
-    language: str = "auto",
-    threshold: float = 0.25,
-) -> dict:
-    """
-    Score song lyrics against songwriting-specific craft patterns.
-
-    Use this instead of score_ai_patterns for song lyrics.
-
-    Categories scored:
-        verse_chorus_structure  — Checks for at least one repeated stanza (chorus/refrain)
-        hook_repetition         — Most-repeated stanza recurs at expected intervals
-        syllable_singability    — Lines >12 syllables flagged as hard to sing in one breath
-        abstract_lyric_density  — Proportion of lines with zero concrete nouns
-        filler_word_density     — Lines that are purely filler (oh yeah, na na, la la)
-        rhyme_scheme_consistency — Stanza-to-stanza rhyme scheme (AABB/ABAB) consistency
-
-    Args:
-        text: The lyrics text
-        doc_type: pop-song|ballad|rap-verse|hymn|jingle (default: pop-song)
-        language: en|pt|auto (default: auto)
-        threshold: Per-category score above which a category is flagged (default: 0.25)
-
-    Returns:
-        overall_score, verdict (clean|review|craft-issue), per-category scores,
-        stanza_count, line_count, word_count, doc_type
-    """
-    from src.tools.song_patterns import score_song_patterns as _score
-    return _score(text=text, doc_type=doc_type, language=language, threshold=threshold)
-
-
-@mcp.tool()
-def score_fiction_patterns(
-    text: str,
-    doc_type: str = "short-story",
-    language: str = "auto",
-    threshold: float = 0.25,
-) -> dict:
-    """
-    Score prose fiction against fiction-specific craft patterns.
-
-    Use this instead of score_ai_patterns for prose fiction.
-
-    Categories scored:
-        show_vs_tell_ratio     — Telling sentences (felt/seemed/was + emotion adj) proportion
-        dialogue_tag_variety   — Non-"said" attribution tags (exclaimed, hissed…) > 30%
-        adverb_overload        — Adverbs modifying dialogue tags (said quietly, replied angrily)
-        filter_word_density    — "She felt / He saw / She noticed" filtering reader from experience
-        purple_prose_density   — ≥3 adjectives + ≥2 abstract nouns in non-dialogue paragraphs
-        narrative_distance     — Distant narration proxy (informational only, not penalised)
-
-    creative-nonfiction uses a higher threshold (0.4) for show_vs_tell_ratio.
-
-    Args:
-        text: The fiction text (chapter, story, or excerpt)
-        doc_type: novel-chapter|short-story|flash-fiction|screenplay|creative-nonfiction
-        language: en|pt|auto (default: auto)
-        threshold: Per-category score above which a category is flagged (default: 0.25)
-
-    Returns:
-        overall_score, verdict (clean|review|craft-issue), per-category scores,
-        paragraph_count, sentence_count, word_count, dialogue_line_count, doc_type
-    """
-    from src.tools.fiction_patterns import score_fiction_patterns as _score
-    return _score(text=text, doc_type=doc_type, language=language, threshold=threshold)
+    if mode == "semantic-ai":
+        from src.tools.ai_patterns import score_semantic_ai_likelihood as _score
+        return _score(text=text, top_k=top_k, client_id=_client_id(ctx))
+    if mode == "ai":
+        from src.tools.ai_patterns import score_ai_patterns as _score
+        return _score(text=text, language=language, threshold=threshold, doc_type=doc_type or "general")
+    if mode == "poetry":
+        from src.tools.poetry_patterns import score_poetry_patterns as _score
+        return _score(text=text, doc_type=doc_type or "free-verse", language=language, threshold=threshold)
+    if mode == "song":
+        from src.tools.song_patterns import score_song_patterns as _score
+        return _score(text=text, doc_type=doc_type or "pop-song", language=language, threshold=threshold)
+    if mode == "fiction":
+        from src.tools.fiction_patterns import score_fiction_patterns as _score
+        return _score(text=text, doc_type=doc_type or "short-story", language=language, threshold=threshold)
+    return {
+        "success": False,
+        "error": f"Invalid mode '{mode}'. Must be one of: ai, semantic-ai, poetry, song, fiction",
+    }
 
 
 @mcp.tool()
@@ -1459,14 +1469,16 @@ def add_thesaurus_entry(
     example_bad: str = "",
     example_good: str = "",
     source: str = "manual",
+    note: str = "",
 ) -> dict:
     """
-    Add a new AI-pattern word to the vocabulary thesaurus (admin only).
+    **Admin only** for direct writes; non-admins are auto-routed to the review queue.
+    Add an AI-pattern word to the vocabulary thesaurus.
 
-    Use this when you encounter a word that is overused or sounds AI-generated
-    and you want to document it with its alternatives for future reference.
-
-    Non-admin users should use contribute_thesaurus_entry() to submit entries for review.
+    Admins write directly to the shared thesaurus (routed_to="library").
+    Non-admin callers are routed to the moderation queue (routed_to="queue") and the
+    entry becomes visible to all users only after an admin reviews it via
+    review_contribution().
 
     Args:
         headword: The word to flag (e.g. "leverage")
@@ -1480,20 +1492,36 @@ def add_thesaurus_entry(
         why_avoid: Why this word sounds AI-generated or overused
         example_bad: Sentence using the headword poorly
         example_good: Sentence using a preferred alternative
-        source: Origin: manual|dicionario-aberto|wordnik|harvested
+        source: Origin: manual|dicionario-aberto|wordnik|harvested (admin path only)
+        note: Optional free-text note stored with queued contributions (non-admin only)
 
     Returns:
-        document_id on success; error if duplicate or invalid input
+        {success, routed_to: "library"|"queue", ...} — shape varies by route.
     """
-    err = _require_admin(ctx)
-    if err:
-        return {"success": False, "error": err}
-    from src.tools.thesaurus import add_thesaurus_entry as _add
-    return _add(headword=headword, language=language, domain=domain,
-                definition=definition, part_of_speech=part_of_speech,
-                register=register, alternatives=alternatives or [],
-                collocations=collocations or [], why_avoid=why_avoid,
-                example_bad=example_bad, example_good=example_good, source=source)
+    caller = _client_id(ctx)
+    if _require_admin(ctx) is None:
+        from src.tools.thesaurus import add_thesaurus_entry as _add
+        result = _add(headword=headword, language=language, domain=domain,
+                      definition=definition, part_of_speech=part_of_speech,
+                      register=register, alternatives=alternatives or [],
+                      collocations=collocations or [], why_avoid=why_avoid,
+                      example_bad=example_bad, example_good=example_good, source=source)
+        if result.get("success"):
+            result["routed_to"] = "library"
+        return result
+    from src.tools.contributions import contribute_thesaurus_entry as _contribute
+    result = _contribute(
+        headword=headword, language=language, domain=domain,
+        definition=definition, part_of_speech=part_of_speech,
+        register=register, alternatives=alternatives or [],
+        collocations=collocations or [], why_avoid=why_avoid,
+        example_bad=example_bad, example_good=example_good,
+        contributed_by=caller, note=note,
+    )
+    if result.get("success"):
+        _notify_contribution(result.get("contribution_id", ""), "thesaurus", headword, caller)
+        result["routed_to"] = "queue"
+    return result
 
 
 @mcp.tool()
@@ -1531,8 +1559,8 @@ def flag_vocabulary(
     """
     Scan text for AI-pattern vocabulary headwords present in the thesaurus.
 
-    Use alongside score_ai_patterns (which catches structural patterns) to
-    get lexical-level flagging. Returns flagged words with occurrence counts
+    Use alongside score_writing_patterns(mode="ai") (which catches structural patterns)
+    to get lexical-level flagging. Returns flagged words with occurrence counts
     and a preview of alternatives.
 
     Args:
@@ -1549,173 +1577,13 @@ def flag_vocabulary(
 
 
 # ---------------------------------------------------------------------------
-# Contribution tools (user-facing)
+# Contribution moderation (admin-facing)
+#
+# Note: contribute_* tools were removed. Non-admin callers of add_term/
+# add_thesaurus_entry/add_rubric_criterion/add_template are routed to the
+# moderation queue automatically (routed_to="queue"). Admins flow directly
+# into the shared library (routed_to="library"). See those tools' docstrings.
 # ---------------------------------------------------------------------------
-
-@mcp.tool()
-def contribute_term(
-    preferred: str,
-    ctx: Context,
-    avoid: str = "",
-    domain: str = "general",
-    language: str = "en",
-    why: str = "",
-    example_bad: str = "",
-    example_good: str = "",
-    note: str = "",
-) -> dict:
-    """
-    Submit a terminology entry for review and potential inclusion in the shared dictionary.
-
-    Unlike add_term() (which saves to your personal dictionary immediately), this sends
-    the entry to a moderation queue. Once an admin approves it, it becomes visible to all users
-    via search_terms(). Your personal add_term() entries are always visible only to you.
-
-    Args:
-        preferred: The term to use (e.g. "rights-holder", "key populations")
-        avoid: Term to avoid (e.g. "victim", "vulnerable groups")
-        domain: Thematic area: srhr|governance|climate|general|m-and-e|health|finance|org
-        language: Language: en|pt|both
-        why: Reason for preference
-        example_bad: Example of poor usage
-        example_good: Example of correct usage
-        note: Optional note to the moderator
-
-    Returns:
-        {success, contribution_id, status: "pending"}
-    """
-    from src.tools.contributions import contribute_term as _contribute
-    result = _contribute(
-        preferred=preferred, avoid=avoid, domain=domain, language=language,
-        why=why, example_bad=example_bad, example_good=example_good,
-        contributed_by=_client_id(ctx), note=note,
-    )
-    if result.get("success"):
-        _notify_contribution(result["contribution_id"], "terms", preferred, _client_id(ctx))
-    return result
-
-
-@mcp.tool()
-def contribute_thesaurus_entry(
-    headword: str,
-    ctx: Context,
-    language: str = "en",
-    domain: str = "general",
-    definition: str = "",
-    part_of_speech: str = "verb",
-    register: str = "neutral",
-    alternatives: Optional[List[dict]] = None,
-    collocations: Optional[List[str]] = None,
-    why_avoid: str = "",
-    example_bad: str = "",
-    example_good: str = "",
-    note: str = "",
-) -> dict:
-    """
-    Submit a new AI-pattern word to the shared vocabulary thesaurus for review.
-
-    Once approved by an admin, the entry is added to the shared thesaurus and
-    becomes available to all users via suggest_alternatives() and flag_vocabulary().
-
-    Args:
-        headword: The word to flag (e.g. "leverage", "robust")
-        language: Language: en|pt
-        domain: Thematic domain: srhr|governance|climate|general|m-and-e|health|finance|org
-        definition: Concise definition
-        part_of_speech: verb|noun|adjective|adverb|phrase
-        register: formal|neutral|informal|institutional|academic
-        alternatives: List of {word, meaning_nuance, register, when_to_use}
-        collocations: Common collocations to flag
-        why_avoid: Why this word sounds AI-generated or overused
-        example_bad: Poor usage example
-        example_good: Good alternative usage
-        note: Optional note to the moderator
-
-    Returns:
-        {success, contribution_id, status: "pending"}
-    """
-    from src.tools.contributions import contribute_thesaurus_entry as _contribute
-    result = _contribute(
-        headword=headword, language=language, domain=domain,
-        definition=definition, part_of_speech=part_of_speech,
-        register=register, alternatives=alternatives or [],
-        collocations=collocations or [], why_avoid=why_avoid,
-        example_bad=example_bad, example_good=example_good,
-        contributed_by=_client_id(ctx), note=note,
-    )
-    if result.get("success"):
-        _notify_contribution(result["contribution_id"], "thesaurus", headword, _client_id(ctx))
-    return result
-
-
-@mcp.tool()
-def contribute_rubric(
-    framework: str,
-    section: str,
-    criterion: str,
-    ctx: Context,
-    weight: float = 1.0,
-    red_flags: Optional[List[str]] = None,
-    note: str = "",
-) -> dict:
-    """
-    Submit an evaluation criterion to the shared rubric library for review.
-
-    Once approved, the criterion is available to all users via score_against_rubric().
-
-    Args:
-        framework: Evaluation framework slug (e.g. "usaid", "undp", "lambda")
-        section: Document section (e.g. "technical-approach", "sustainability")
-        criterion: The criterion description
-        weight: Relative importance 0.1–2.0 (default 1.0)
-        red_flags: Phrases that evaluators penalise
-        note: Optional note to the moderator
-
-    Returns:
-        {success, contribution_id, status: "pending"}
-    """
-    from src.tools.contributions import contribute_rubric as _contribute
-    result = _contribute(
-        framework=framework, section=section, criterion=criterion,
-        weight=weight, red_flags=red_flags or [],
-        contributed_by=_client_id(ctx), note=note,
-    )
-    if result.get("success"):
-        _notify_contribution(result["contribution_id"], "rubrics", f"{framework}/{section}", _client_id(ctx))
-    return result
-
-
-@mcp.tool()
-def contribute_template(
-    framework: str,
-    doc_type: str,
-    sections: List[dict],
-    ctx: Context,
-    note: str = "",
-) -> dict:
-    """
-    Submit a document structure template to the shared library for review.
-
-    Once approved, the template is available to all users via check_structure().
-
-    Args:
-        framework: Framework slug (e.g. "undp", "lambda", "ds-moz")
-        doc_type: Document type — see registry for valid values
-        sections: List of {name, description, required (bool), order (int)}
-        note: Optional note to the moderator
-
-    Returns:
-        {success, contribution_id, status: "pending"}
-    """
-    from src.tools.contributions import contribute_template as _contribute
-    result = _contribute(
-        framework=framework, doc_type=doc_type, sections=sections,
-        contributed_by=_client_id(ctx), note=note,
-    )
-    if result.get("success"):
-        _notify_contribution(result["contribution_id"], "templates", f"{framework}/{doc_type}", _client_id(ctx))
-    return result
-
 
 @mcp.tool()
 def list_contributions(
@@ -1759,7 +1627,7 @@ def review_contribution(
     rejection_reason: str = "",
 ) -> dict:
     """
-    Publish or reject a pending contribution. Admin only.
+    **Admin only.** Publish or reject a pending contribution.
 
     On publish: copies the entry into the target shared collection (terms_shared,
     thesaurus, rubrics, or templates). On reject: marks as rejected with reason.
