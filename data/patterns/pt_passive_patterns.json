@@ -1,0 +1,6 @@
+{
+  "description": "PT synthetic-passive regex patterns (foi realizado, são implementadas, etc.)",
+  "items": [
+    "\\b(?:é|são|foi|foram|será|serão|seria|seriam|sendo|sido)\\s+\\w+(?:ado|ido|ada|ida|ados|idas)\\b"
+  ]
+}

@@ -316,11 +316,12 @@ def test_return_structure_complete():
     assert result["success"] is True
     required_keys = {"language", "overall_score", "verdict", "threshold", "doc_type", "categories", "summary", "word_count", "page_equivalent"}
     assert required_keys.issubset(result.keys())
-    # All 10 categories present
+    # All 12 categories present (Phase 2 adds sentence_burstiness + hedging_removal)
     expected_categories = {
         "connector_repetition", "hollow_intensifiers", "grandiose_openers",
         "em_dash_intercalation", "sentence_monotony", "passive_voice",
         "paragraph_length", "discursive_deficit", "mechanical_listing", "generic_closings",
+        "sentence_burstiness", "hedging_removal",
     }
     assert expected_categories == set(result["categories"].keys())
 
@@ -494,3 +495,83 @@ def test_semantic_ai_likelihood_kbase_unavailable():
         from src.tools.ai_patterns import score_semantic_ai_likelihood
         result = score_semantic_ai_likelihood("Some text.")
     assert result["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — sentence_burstiness + hedging_removal
+# ---------------------------------------------------------------------------
+
+UNIFORM_SENTENCES = (
+    "The project ran smoothly today. The team worked hard today. "
+    "The goals were met today. The outputs were clear today. "
+    "The results proved sound today. The plan moved on today."
+)
+
+BURSTY_SENTENCES = (
+    "Yes. The programme reached forty thousand people last year across fifteen "
+    "districts in the south of the country. Briefly, it worked. What changed "
+    "mattered more than what the scorecard captured — a shift in how families "
+    "came to the clinic. Numbers lag. Narratives run ahead."
+)
+
+NO_HEDGE_TEXT = (
+    "The programme reached its targets. Community uptake grew. The approach "
+    "works. Outcomes improved across all sites. The model scales. Partners "
+    "will adopt it next quarter. Funders will increase allocation."
+)
+
+HEDGED_TEXT = (
+    "Arguably, the programme reached most targets. Uptake perhaps grew, "
+    "though the data tends to be noisy at district level. The approach "
+    "appears to work in urban sites and may suggest a fit for peri-urban too. "
+    "In many cases, partners seemingly agree, but to some extent the evidence "
+    "is thin. One might argue that scaling is plausibly premature."
+)
+
+
+def test_burstiness_fires_on_uniform_sentences():
+    r = score_ai_patterns(UNIFORM_SENTENCES, doc_type="general", language="en")
+    assert r["success"]
+    assert r["categories"]["sentence_burstiness"]["score"] > 0.3
+
+
+def test_burstiness_zero_on_bursty_text():
+    r = score_ai_patterns(BURSTY_SENTENCES, doc_type="general", language="en")
+    assert r["success"]
+    assert r["categories"]["sentence_burstiness"]["score"] < 0.4
+
+
+def test_burstiness_zero_on_too_few_sentences():
+    r = score_ai_patterns("Short text.", doc_type="general", language="en")
+    assert r["success"]
+    assert r["categories"]["sentence_burstiness"]["score"] == 0.0
+
+
+def test_hedging_fires_on_declarative_text():
+    r = score_ai_patterns(NO_HEDGE_TEXT, doc_type="concept-note", language="en")
+    assert r["success"]
+    assert r["categories"]["hedging_removal"]["score"] > 0.5
+
+
+def test_hedging_zero_on_hedge_rich_text():
+    r = score_ai_patterns(HEDGED_TEXT, doc_type="concept-note", language="en")
+    assert r["success"]
+    assert r["categories"]["hedging_removal"]["score"] == 0.0
+
+
+def test_hedging_disabled_for_financial_report():
+    r = score_ai_patterns(NO_HEDGE_TEXT, doc_type="financial-report", language="en")
+    assert r["success"]
+    assert r["categories"]["hedging_removal"]["score"] == 0.0
+
+
+def test_hedging_disabled_for_social_and_creative_doc_types():
+    for dt in ("facebook-post", "haiku", "pop-song", "short-story"):
+        r = score_ai_patterns(NO_HEDGE_TEXT, doc_type=dt, language="en")
+        assert r["success"], r
+        assert r["categories"]["hedging_removal"]["score"] == 0.0
+
+
+def test_client_id_parameter_is_accepted():
+    r = score_ai_patterns(CLEAN_TEXT, doc_type="general", language="en", client_id="alice")
+    assert r["success"]

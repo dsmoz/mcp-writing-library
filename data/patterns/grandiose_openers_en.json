@@ -1,0 +1,17 @@
+{
+  "description": "Grandiose paragraph opener regex patterns (EN)",
+  "items": [
+    "against this backdrop",
+    "the fundamental insight here is that",
+    "what emerges from this analysis",
+    "the picture that emerges",
+    "these .{0,30} are not mere",
+    "\\w+ deserve(?:s)? special attention",
+    "in this context of",
+    "at the heart of this",
+    "this is a pivotal moment",
+    "this represents a watershed",
+    "the evidence is unequivocal",
+    "the data paints? a (?:clear|stark|compelling)"
+  ]
+}

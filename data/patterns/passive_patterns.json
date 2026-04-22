@@ -1,0 +1,7 @@
+{
+  "description": "EN passive-voice regex patterns",
+  "items": [
+    "\\b(?:was|were|is|are|has been|have been|had been|being)\\s+\\w+ed\\b",
+    "\\b(?:was|were|is|are|has been|have been|had been|being)\\s+\\w+en\\b"
+  ]
+}

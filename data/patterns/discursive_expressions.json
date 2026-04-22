@@ -1,0 +1,25 @@
+{
+  "description": "Discursive stance marker regex patterns (EN + PT); their absence is the AI signal",
+  "items": [
+    "what (?:this|the analysis|the evidence) (?:reveals?|shows?|suggests?|indicates?)",
+    "what emerges from",
+    "the key (?:insight|finding|implication) (?:here )?is",
+    "what makes this (?:particularly )?significant",
+    "this raises (?:a )?(?:crucial|important|key) question",
+    "the implications extend beyond",
+    "what this means in practice",
+    "to understand why",
+    "consider what this suggests",
+    "the challenge,? then,? is",
+    "building on this",
+    "this is evident in",
+    "o que (?:esta|a análise|os dados) (?:revela?|mostra?|sugere?)",
+    "o que emerge de",
+    "a (?:conclusão|lição|implicação) central (?:aqui )?é",
+    "o que isto significa na prática",
+    "para compreender (?:por que|porquê)",
+    "esta (?:questão|realidade) é evidente em",
+    "construindo sobre isto",
+    "o desafio,? portanto,? é"
+  ]
+}

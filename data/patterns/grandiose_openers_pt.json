@@ -1,0 +1,15 @@
+{
+  "description": "Grandiose paragraph opener regex patterns (PT)",
+  "items": [
+    "contra este pano de fundo",
+    "a percep[çc][ãa]o fundamental aqui [eé] que",
+    "o quadro que emerge",
+    "estas? .{0,30} n[ãa]o s[ãa]o meros?",
+    "\\w+ merece(?:m)? destaque",
+    "neste contexto de",
+    "no cerne desta",
+    "este [eé] um momento fulcral",
+    "os dados revelam",
+    "a evid[eê]ncia [eé] inequ[íi]voca"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "description": "Generic AI closing phrase regex patterns (EN)",
+  "items": [
+    "in conclusion,? this (?:report|document|paper|analysis) has shown",
+    "to summaris[e] the above",
+    "to summarize the above",
+    "as (?:has been )?demonstrated above",
+    "as (?:has been )?shown above",
+    "in summary,? this (?:report|document|analysis)",
+    "the foregoing analysis (?:has shown|demonstrates)",
+    "as outlined (?:above|in this report)"
+  ]
+}
