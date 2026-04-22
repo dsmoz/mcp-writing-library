@@ -1,0 +1,6 @@
+{
+  "description": "PT nominalisation suffix regex alternation (high ratio = abstract, verb-poor prose)",
+  "items": [
+    "ção|ções|mento|mentos|dade|dades|eza|ezas|ismo|ismos|tura|turas|ncia|ncias"
+  ]
+}

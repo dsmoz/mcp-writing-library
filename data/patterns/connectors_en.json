@@ -1,0 +1,18 @@
+{
+  "description": "EN connectors that read as AI-generated when repeated",
+  "items": [
+    "furthermore",
+    "additionally",
+    "moreover",
+    "in conclusion",
+    "in summary",
+    "to summarise",
+    "to summarize",
+    "firstly",
+    "secondly",
+    "thirdly",
+    "lastly",
+    "in addition",
+    "it is worth noting"
+  ]
+}

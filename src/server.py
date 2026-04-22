@@ -1,18 +1,20 @@
 """
-MCP Writing Library Server — FastMCP tool definitions (Phase 5A: 20-tool surface).
+MCP Writing Library Server — FastMCP tool definitions (21-tool surface).
 
 Scoring / search (12, unchanged):
     search_passages, search_terms, check_internal_similarity, check_external_similarity,
     score_writing_patterns, verify_claims, score_evidence_density, score_against_rubric,
     check_structure, score_voice_consistency, detect_authorship_shift, flag_vocabulary
 
-Merged CRUD / manage (6):
+Merged CRUD / manage (7):
     manage_passage(action ∈ {add, update, delete, correction})
     manage_term(action ∈ {add, update, delete})  — share-branching preserved
-    manage_style_profile(action ∈ {save, load, search, list, harvest-corrections})
+    manage_style_profile(action ∈ {save, load, search, list, harvest-corrections, inject-context})
     search_thesaurus(query, rich=False, ...)  — rich=True = former suggest_alternatives
     manage_contributions(action ∈ {list, review})
     manage_library(action ∈ {stats, export})
+    manage_patterns(action ∈ {list-files, list, add, remove, set-target, reset, my-overrides})
+        — per-user overrides on top of core JSON pattern lists in data/patterns/
 
 Admin writes merged (1):
     admin_add(kind ∈ {rubric, template, thesaurus})
@@ -163,7 +165,7 @@ def _build_mcp() -> FastMCP:
         "  2. Seed model passages: check_internal_similarity → manage_passage(action='add').\n"
         "  3. Corrections pair: manage_passage(action='correction', original=..., corrected=...).\n"
         "  4. Style profiles: manage_style_profile(action ∈ {save, load, search, list, harvest-corrections}).\n"
-        "  5. Craft scoring: score_writing_patterns(mode ∈ {ai|semantic-ai|poetry|song|fiction}).\n"
+        "  5. Craft scoring: score_writing_patterns(mode ∈ {ai|pt|semantic-ai|poetry|song|fiction}).\n"
         "  6. Evidence: verify_claims (ghost_stat=True always blocks) + score_evidence_density.\n"
         "  7. Rubric alignment: score_against_rubric; admins add criteria via admin_add(kind='rubric').\n"
         "  8. Structure check: check_structure; admins add templates via admin_add(kind='template').\n"
@@ -338,7 +340,7 @@ def score_writing_patterns(
 
     Args:
         text: The text to score
-        mode: ai|semantic-ai|poetry|song|fiction
+        mode: ai|pt|semantic-ai|poetry|song|fiction
         language: "en", "pt", or "auto" (ignored by semantic-ai)
         doc_type: Mode-specific document/form type
         threshold: Per-category flag threshold (ignored by semantic-ai)
@@ -352,7 +354,10 @@ def score_writing_patterns(
         return _score(text=text, top_k=top_k, client_id=_client_id(ctx))
     if mode == "ai":
         from src.tools.ai_patterns import score_ai_patterns as _score
-        return _score(text=text, language=language, threshold=threshold, doc_type=doc_type or "general")
+        return _score(text=text, language=language, threshold=threshold, doc_type=doc_type or "general", client_id=_client_id(ctx))
+    if mode == "pt":
+        from src.tools.pt_forensic import score_pt_forensic as _score
+        return _score(text=text, language=language, threshold=threshold, doc_type=doc_type or "general", client_id=_client_id(ctx))
     if mode == "poetry":
         from src.tools.poetry_patterns import score_poetry_patterns as _score
         return _score(text=text, doc_type=doc_type or "free-verse", language=language, threshold=threshold)
@@ -364,7 +369,7 @@ def score_writing_patterns(
         return _score(text=text, doc_type=doc_type or "short-story", language=language, threshold=threshold)
     return {
         "success": False,
-        "error": f"Invalid mode '{mode}'. Must be one of: ai, semantic-ai, poetry, song, fiction",
+        "error": f"Invalid mode '{mode}'. Must be one of: ai, pt, semantic-ai, poetry, song, fiction",
     }
 
 
@@ -791,9 +796,12 @@ def manage_style_profile(
         harvest-corrections  — Scan correction corpus and surface candidate rules to merge
                                into profile `name`. Returns candidates only — agent must
                                re-save with manage_style_profile(action='save') after review.
+        inject-context       — Format profile `name` as a few-shot prompt block (rules +
+                               avoid list + example excerpts) ready to paste into a system
+                               prompt. Research shows 3–5 excerpts give up to 23.5× style fidelity.
 
     Args:
-        action: save|load|search|list|harvest-corrections
+        action: save|load|search|list|harvest-corrections|inject-context
         name: Profile name (required by save/load/harvest-corrections)
         channel: Publishing surface (linkedin|email|report|proposal|general|...)
         style_scores, rules, anti_patterns, sample_excerpts, description, source_documents:
@@ -876,7 +884,13 @@ def manage_style_profile(
             client_id=client_id,
         )
 
-    return {"success": False, "error": f"Invalid action '{action}'. Must be one of: save, load, search, list, harvest-corrections"}
+    if action == "inject-context":
+        if not name:
+            return {"success": False, "error": "action='inject-context' requires 'name'"}
+        from src.tools.style_profiles import get_style_injection_context as _inject
+        return _inject(name=name, client_id=client_id)
+
+    return {"success": False, "error": f"Invalid action '{action}'. Must be one of: save, load, search, list, harvest-corrections, inject-context"}
 
 
 @mcp.tool()
@@ -1155,6 +1169,126 @@ def admin_add(
         return result
 
     return {"success": False, "error": f"Invalid kind '{kind}'. Must be one of: rubric, template, thesaurus"}
+
+
+# ===========================================================================
+# 3b. PER-USER PATTERN MANAGEMENT (1 tool)
+# ===========================================================================
+
+@mcp.tool()
+def manage_patterns(
+    action: str,
+    ctx: Context,
+    file: Optional[str] = None,
+    value: Optional[str] = None,
+    doc_type: Optional[str] = None,
+    target: Optional[float] = None,
+) -> dict:
+    """Manage per-user AI-pattern detection lists (runtime read/write).
+
+    Reads return the effective merged data for the caller (core + per-user
+    overrides). Writes only ever touch the per-user override layer — core
+    defaults under data/patterns/ are read-only here.
+
+    Actions:
+        list-files    — Return all core pattern filenames (no params).
+        list          — Return effective items/values for `file`.
+        add           — Add `value` to caller's added list (items-style only).
+        remove        — Drop from caller's added list, or mark as removed if
+                        present in core (items-style only).
+        set-target    — Upsert `doc_type` → `target` in caller's value overrides
+                        (values-style only, e.g. para_limits, hedging_targets).
+        reset         — Clear caller's override file for `file`.
+        my-overrides  — Summary of all of caller's overrides (no params).
+
+    Args:
+        action: list-files|list|add|remove|set-target|reset|my-overrides
+        file: pattern filename (without .json) — required by all actions except
+              list-files and my-overrides
+        value: the item to add/remove (add/remove only)
+        doc_type: key for set-target (usually a doc_type like "concept-note")
+        target: numeric value for set-target
+
+    Returns:
+        Action-specific dict. On mutation, returns the resulting effective
+        items/values list.
+    """
+    from src.tools.pattern_store import (
+        add_user_item,
+        clear_cache,
+        list_pattern_files,
+        list_user_overrides,
+        load_description,
+        load_items,
+        load_values,
+        remove_user_item,
+        reset_user_overrides,
+        set_user_value,
+    )
+
+    client_id = _client_id(ctx)
+
+    if action == "list-files":
+        files = list_pattern_files()
+        return {
+            "success": True,
+            "files": [
+                {"file": f, "description": load_description(f)} for f in files
+            ],
+            "count": len(files),
+        }
+
+    if action == "my-overrides":
+        return {"success": True, "client_id": client_id, "overrides": list_user_overrides(client_id)}
+
+    if not file:
+        return {"success": False, "error": f"action='{action}' requires 'file'"}
+
+    if file not in list_pattern_files():
+        return {"success": False, "error": f"Unknown pattern file '{file}'. Use action='list-files' to see available files."}
+
+    try:
+        if action == "list":
+            from src.tools.pattern_store import _core_path, _read_json
+            core = _read_json(_core_path(file)) or {}
+            if "items" in core:
+                items = load_items(file, client_id)
+                return {"success": True, "file": file, "action": action, "items": items, "count": len(items), "source": "merged"}
+            values = load_values(file, client_id)
+            return {"success": True, "file": file, "action": action, "values": values, "source": "merged"}
+
+        if action == "add":
+            if value is None or value == "":
+                return {"success": False, "error": "action='add' requires 'value'"}
+            items = add_user_item(file, value, client_id)
+            return {"success": True, "file": file, "action": action, "value": value, "items": items, "source": "user"}
+
+        if action == "remove":
+            if value is None or value == "":
+                return {"success": False, "error": "action='remove' requires 'value'"}
+            items = remove_user_item(file, value, client_id)
+            return {"success": True, "file": file, "action": action, "value": value, "items": items, "source": "user"}
+
+        if action == "set-target":
+            if doc_type is None or target is None:
+                return {"success": False, "error": "action='set-target' requires 'doc_type' and 'target'"}
+            try:
+                target_f = float(target)
+            except (TypeError, ValueError):
+                return {"success": False, "error": f"'target' must be numeric, got {target!r}"}
+            values = set_user_value(file, doc_type, target_f, client_id)
+            return {"success": True, "file": file, "action": action, "doc_type": doc_type, "target": target_f, "values": values, "source": "user"}
+
+        if action == "reset":
+            reset_user_overrides(file, client_id)
+            clear_cache()
+            return {"success": True, "file": file, "action": action, "note": "Overrides cleared. Reverted to core defaults."}
+
+        return {"success": False, "error": f"Invalid action '{action}'. Must be one of: list-files, list, add, remove, set-target, reset, my-overrides"}
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        return {"success": False, "error": f"manage_patterns failed: {e}"}
 
 
 # ===========================================================================

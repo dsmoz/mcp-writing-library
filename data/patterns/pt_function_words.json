@@ -1,0 +1,31 @@
+{
+  "description": "Portuguese function words used by the language detector",
+  "items": [
+    "que",
+    "uma",
+    "para",
+    "com",
+    "por",
+    "são",
+    "também",
+    "mais",
+    "sobre",
+    "como",
+    "mas",
+    "dos",
+    "das",
+    "nos",
+    "nas",
+    "quando",
+    "porque",
+    "entre",
+    "seus",
+    "suas",
+    "este",
+    "esta",
+    "estes",
+    "estas",
+    "isso",
+    "essa"
+  ]
+}

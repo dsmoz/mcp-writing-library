@@ -25,6 +25,7 @@ from typing import List, Optional, Tuple
 import structlog
 
 from src.sentry import capture_tool_error
+from src.tools.pattern_store import load_items, load_values
 from src.tools.qdrant_errors import handle_qdrant_error
 
 logger = structlog.get_logger(__name__)
@@ -36,191 +37,55 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Pattern definitions
+# Pattern definitions — loaded from data/patterns/*.json via pattern_store
+# (two-layer: core defaults + per-user overrides). Seeded by
+# scripts/seed_patterns.py; mutated at runtime via manage_patterns.
 # ---------------------------------------------------------------------------
 
-# Connectors that become AI markers when repeated
-_CONNECTORS_EN = [
-    "furthermore", "additionally", "moreover", "in conclusion", "in summary",
-    "to summarise", "to summarize", "firstly", "secondly", "thirdly",
-    "lastly", "in addition", "it is worth noting",
-]
+def _connectors_en(client_id: str = "default") -> List[str]:
+    return load_items("connectors_en", client_id)
 
-_CONNECTORS_PT = [
-    "além disso", "adicionalmente", "ademais", "em conclusão", "em resumo",
-    "em primeiro lugar", "em segundo lugar", "em terceiro lugar",
-    "por último", "igualmente", "do mesmo modo",
-]
+def _connectors_pt(client_id: str = "default") -> List[str]:
+    return load_items("connectors_pt", client_id)
 
-# Hollow intensifiers (EN only — PT has different equivalents)
-_HOLLOW_INTENSIFIERS = [
-    r"it is important to note that",
-    r"it is crucial that",
-    r"it is essential to recognise",
-    r"it is essential to recognize",
-    r"it should be noted that",
-    r"it is worth noting that",
-    r"it is important to highlight",
-    r"it bears emphasising",
-    r"it bears emphasizing",
-    r"it must be acknowledged",
-    r"needless to say",
-]
+def _hollow_intensifiers(client_id: str = "default") -> List[str]:
+    return load_items("hollow_intensifiers", client_id)
 
-# Grandiose paragraph openers (EN)
-_GRANDIOSE_OPENERS_EN = [
-    r"against this backdrop",
-    r"the fundamental insight here is that",
-    r"what emerges from this analysis",
-    r"the picture that emerges",
-    r"these .{0,30} are not mere",
-    r"\w+ deserve(?:s)? special attention",
-    r"in this context of",
-    r"at the heart of this",
-    r"this is a pivotal moment",
-    r"this represents a watershed",
-    r"the evidence is unequivocal",
-    r"the data paints? a (?:clear|stark|compelling)",
-]
+def _grandiose_openers_en(client_id: str = "default") -> List[str]:
+    return load_items("grandiose_openers_en", client_id)
 
-# Grandiose paragraph openers (PT)
-_GRANDIOSE_OPENERS_PT = [
-    r"contra este pano de fundo",
-    r"a percep[çc][ãa]o fundamental aqui [eé] que",
-    r"o quadro que emerge",
-    r"estas? .{0,30} n[ãa]o s[ãa]o meros?",
-    r"\w+ merece(?:m)? destaque",
-    r"neste contexto de",
-    r"no cerne desta",
-    r"este [eé] um momento fulcral",
-    r"os dados revelam",
-    r"a evid[eê]ncia [eé] inequ[íi]voca",
-]
+def _grandiose_openers_pt(client_id: str = "default") -> List[str]:
+    return load_items("grandiose_openers_pt", client_id)
 
-# Generic closings (EN)
-_GENERIC_CLOSINGS = [
-    r"in conclusion,? this (?:report|document|paper|analysis) has shown",
-    r"to summaris[e] the above",
-    r"to summarize the above",
-    r"as (?:has been )?demonstrated above",
-    r"as (?:has been )?shown above",
-    r"in summary,? this (?:report|document|analysis)",
-    r"the foregoing analysis (?:has shown|demonstrates)",
-    r"as outlined (?:above|in this report)",
-]
+def _generic_closings(client_id: str = "default") -> List[str]:
+    return load_items("generic_closings", client_id)
 
-# Discursive expressions (positive — their absence is the signal)
-_DISCURSIVE_EXPRESSIONS = [
-    # EN stance markers
-    r"what (?:this|the analysis|the evidence) (?:reveals?|shows?|suggests?|indicates?)",
-    r"what emerges from",
-    r"the key (?:insight|finding|implication) (?:here )?is",
-    r"what makes this (?:particularly )?significant",
-    r"this raises (?:a )?(?:crucial|important|key) question",
-    r"the implications extend beyond",
-    r"what this means in practice",
-    r"to understand why",
-    r"consider what this suggests",
-    r"the challenge,? then,? is",
-    r"building on this",
-    r"this is evident in",
-    # PT stance markers
-    r"o que (?:esta|a análise|os dados) (?:revela?|mostra?|sugere?)",
-    r"o que emerge de",
-    r"a (?:conclusão|lição|implicação) central (?:aqui )?é",
-    r"o que isto significa na prática",
-    r"para compreender (?:por que|porquê)",
-    r"esta (?:questão|realidade) é evidente em",
-    r"construindo sobre isto",
-    r"o desafio,? portanto,? é",
-]
+def _discursive_expressions(client_id: str = "default") -> List[str]:
+    return load_items("discursive_expressions", client_id)
 
-# Passive voice heuristic patterns (EN)
-_PASSIVE_PATTERNS = [
-    r"\b(?:was|were|is|are|has been|have been|had been|being)\s+\w+ed\b",
-    r"\b(?:was|were|is|are|has been|have been|had been|being)\s+\w+en\b",
-]
+def _passive_patterns(client_id: str = "default") -> List[str]:
+    return load_items("passive_patterns", client_id)
 
-# Portuguese function words for language detection
-_PT_FUNCTION_WORDS = {
-    "que", "uma", "para", "com", "por", "são", "também", "mais", "sobre",
-    "como", "mas", "dos", "das", "nos", "nas", "quando", "porque", "entre",
-    "seus", "suas", "este", "esta", "estes", "estas", "isso", "essa",
-}
+def _pt_function_words(client_id: str = "default") -> set:
+    return set(load_items("pt_function_words", client_id))
 
-# Max sentences per paragraph before flagging, keyed by doc_type
-_PARA_LIMITS = {
-    "concept-note": 4,
-    "full-proposal": 4,
-    "eoi": 4,
-    "executive-summary": 3,
-    "general": 5,
-    "annual-report": 6,
-    "monitoring-report": 7,
-    "financial-report": 8,
-    "assessment": 7,
-    "tor": 6,
-    "governance-review": 6,
-    # Social media — short-form, single visual blocks
-    "facebook-post": 2,
-    "linkedin-post": 3,
-    "instagram-caption": 1,
-    # Poetry — stanzas, not paragraphs
-    "haiku": 1,
-    "sonnet": 4,
-    "free-verse": 6,
-    "villanelle": 6,
-    "spoken-word": 8,
-    # Songwriting — verse/chorus blocks
-    "pop-song": 4,
-    "ballad": 6,
-    "rap-verse": 8,
-    "hymn": 4,
-    "jingle": 2,
-    # Prose fiction — longer blocks permissible
-    "novel-chapter": 8,
-    "short-story": 7,
-    "flash-fiction": 4,
-    "screenplay": 3,
-    "creative-nonfiction": 6,
-}
+def _para_limits(client_id: str = "default") -> dict:
+    return load_values("para_limits", client_id)
 
-# Required discursive expressions per 300-word page, keyed by doc_type
-_DISCURSIVE_TARGETS = {
-    "concept-note": 2.0,
-    "full-proposal": 2.0,
-    "eoi": 1.5,
-    "executive-summary": 2.0,
-    "general": 1.0,
-    "annual-report": 1.0,
-    "monitoring-report": 0.5,
-    "financial-report": 0.0,
-    "assessment": 1.0,
-    "tor": 0.5,
-    "governance-review": 1.0,
-    # Social media — discursive connectors are not expected in short-form posts
-    "facebook-post": 0.0,
-    "linkedin-post": 0.5,
-    "instagram-caption": 0.0,
-    # Poetry — stanzas not paragraphs; discursive stance markers inapplicable
-    "haiku": 0.0,
-    "sonnet": 0.0,
-    "free-verse": 0.0,
-    "villanelle": 0.0,
-    "spoken-word": 0.0,
-    # Songwriting — inapplicable
-    "pop-song": 0.0,
-    "ballad": 0.0,
-    "rap-verse": 0.0,
-    "hymn": 0.0,
-    "jingle": 0.0,
-    # Prose fiction — very low; creative-nonfiction admits some
-    "novel-chapter": 0.0,
-    "short-story": 0.0,
-    "flash-fiction": 0.0,
-    "screenplay": 0.0,
-    "creative-nonfiction": 0.3,
-}
+def _discursive_targets(client_id: str = "default") -> dict:
+    return load_values("discursive_targets", client_id)
+
+def _hedging_words(language: str, client_id: str = "default") -> List[str]:
+    words = load_items("hedging_words_en", client_id)
+    if language == "pt":
+        words = words + load_items("hedging_words_pt", client_id)
+    return words
+
+def _hedging_targets(client_id: str = "default") -> dict:
+    return load_values("hedging_targets", client_id)
+
+def _config(client_id: str = "default") -> dict:
+    return load_values("config", client_id)
 
 # Social doc_types where discursive_deficit is structurally inapplicable
 _SOCIAL_DOC_TYPES = frozenset({"facebook-post", "linkedin-post", "instagram-caption"})
@@ -238,12 +103,13 @@ _CREATIVE_DOC_TYPES = frozenset({
 # Language detection
 # ---------------------------------------------------------------------------
 
-def _detect_language(text: str) -> str:
+def _detect_language(text: str, client_id: str = "default") -> str:
     """Simple heuristic: count PT function words in lowercased text."""
     words = re.findall(r"\b\w+\b", text.lower())
     if not words:
         return "en"
-    pt_count = sum(1 for w in words if w in _PT_FUNCTION_WORDS)
+    pt_words = _pt_function_words(client_id)
+    pt_count = sum(1 for w in words if w in pt_words)
     ratio = pt_count / len(words)
     return "pt" if ratio >= 0.05 else "en"
 
@@ -273,9 +139,10 @@ def _sentence_word_count(sentence: str) -> int:
 # Individual detectors
 # ---------------------------------------------------------------------------
 
-def _detect_connector_repetition(text: str, language: str) -> Tuple[float, List[dict]]:
+def _detect_connector_repetition(text: str, language: str, client_id: str = "default") -> Tuple[float, List[dict]]:
     """Flag connectors that appear more than once."""
-    connectors = _CONNECTORS_EN if language == "en" else _CONNECTORS_EN + _CONNECTORS_PT
+    en = _connectors_en(client_id)
+    connectors = en if language == "en" else en + _connectors_pt(client_id)
     lower = text.lower()
     findings = []
     total_excess_hits = 0
@@ -300,13 +167,13 @@ def _detect_connector_repetition(text: str, language: str) -> Tuple[float, List[
     return round(score, 3), findings
 
 
-def _detect_hollow_intensifiers(text: str) -> Tuple[float, List[dict]]:
+def _detect_hollow_intensifiers(text: str, client_id: str = "default") -> Tuple[float, List[dict]]:
     """Detect hollow intensifier phrases."""
     lower = text.lower()
     findings = []
     hit_count = 0
 
-    for pattern in _HOLLOW_INTENSIFIERS:
+    for pattern in _hollow_intensifiers(client_id):
         for m in re.finditer(pattern, lower):
             hit_count += 1
             start = max(0, m.start())
@@ -319,9 +186,9 @@ def _detect_hollow_intensifiers(text: str) -> Tuple[float, List[dict]]:
     return round(score, 3), findings
 
 
-def _detect_grandiose_openers(text: str, language: str) -> Tuple[float, List[dict]]:
+def _detect_grandiose_openers(text: str, language: str, client_id: str = "default") -> Tuple[float, List[dict]]:
     """Detect grandiose paragraph openings."""
-    patterns = _GRANDIOSE_OPENERS_PT if language == "pt" else _GRANDIOSE_OPENERS_EN
+    patterns = _grandiose_openers_pt(client_id) if language == "pt" else _grandiose_openers_en(client_id)
     paragraphs = _split_paragraphs(text)
     findings = []
     hit_count = 0
@@ -397,15 +264,16 @@ def _detect_sentence_monotony(text: str) -> Tuple[float, List[dict]]:
     return round(score, 3), findings
 
 
-def _detect_passive_voice(text: str) -> Tuple[float, List[dict]]:
+def _detect_passive_voice(text: str, client_id: str = "default") -> Tuple[float, List[dict]]:
     """Detect high passive voice density (>25% of sentences)."""
     sentences = _split_sentences(text)
     findings = []
     passive_count = 0
+    passive_pats = _passive_patterns(client_id)
 
     for sentence in sentences:
         lower = sentence.lower()
-        is_passive = any(re.search(pat, lower) for pat in _PASSIVE_PATTERNS)
+        is_passive = any(re.search(pat, lower) for pat in passive_pats)
         if is_passive:
             passive_count += 1
             findings.append({"excerpt": sentence[:150]})
@@ -416,7 +284,7 @@ def _detect_passive_voice(text: str) -> Tuple[float, List[dict]]:
     return round(score, 3), findings if passive_ratio > 0.25 else []
 
 
-def _detect_paragraph_length(text: str, max_sentences: int = _PARA_LIMITS["general"], stanza_mode: bool = False) -> Tuple[float, List[dict]]:
+def _detect_paragraph_length(text: str, max_sentences: int = 5, stanza_mode: bool = False) -> Tuple[float, List[dict]]:
     """Detect paragraphs exceeding max_sentences sentences."""
     paragraphs = _split_paragraphs(text, stanza_mode=stanza_mode)
     findings = []
@@ -436,7 +304,7 @@ def _detect_paragraph_length(text: str, max_sentences: int = _PARA_LIMITS["gener
     return round(score, 3), findings
 
 
-def _detect_discursive_deficit(text: str, target: float = _DISCURSIVE_TARGETS["general"]) -> Tuple[float, List[dict]]:
+def _detect_discursive_deficit(text: str, target: float = 1.0, client_id: str = "default") -> Tuple[float, List[dict]]:
     """Detect fewer than target discursive expressions per ~300-word page."""
     if target == 0.0:
         return 0.0, []
@@ -446,7 +314,7 @@ def _detect_discursive_deficit(text: str, target: float = _DISCURSIVE_TARGETS["g
     pages = max(word_count / 300, 1)
 
     hit_count = 0
-    for pattern in _DISCURSIVE_EXPRESSIONS:
+    for pattern in _discursive_expressions(client_id):
         if re.search(pattern, lower):
             hit_count += 1
 
@@ -489,13 +357,13 @@ def _detect_mechanical_listing(text: str) -> Tuple[float, List[dict]]:
     return round(score, 3), findings
 
 
-def _detect_generic_closings(text: str) -> Tuple[float, List[dict]]:
+def _detect_generic_closings(text: str, client_id: str = "default") -> Tuple[float, List[dict]]:
     """Detect generic AI closing phrases."""
     lower = text.lower()
     findings = []
     hit_count = 0
 
-    for pattern in _GENERIC_CLOSINGS:
+    for pattern in _generic_closings(client_id):
         for m in re.finditer(pattern, lower):
             hit_count += 1
             start = m.start()
@@ -503,6 +371,64 @@ def _detect_generic_closings(text: str) -> Tuple[float, List[dict]]:
             findings.append({"excerpt": text[start:end].strip()})
 
     score = min(1.0, hit_count * 0.5)  # 2 hits = score 1.0
+    return round(score, 3), findings
+
+
+def _detect_sentence_burstiness(text: str, client_id: str = "default") -> Tuple[float, List[dict]]:
+    """Flag low burstiness: sentence lengths too uniform (CoV below threshold).
+
+    AI-generated prose tends to produce sentences of similar length; human prose
+    varies more. Coefficient of variation (stdev/mean) below `burstiness_cov_threshold`
+    is scored proportionally. Fewer than 3 sentences → 0.0 (insufficient signal).
+    """
+    from statistics import mean, pstdev
+
+    sentences = _split_sentences(text)
+    if len(sentences) < 3:
+        return 0.0, []
+    lengths = [_sentence_word_count(s) for s in sentences]
+    m = mean(lengths)
+    if m == 0:
+        return 0.0, []
+    cov = pstdev(lengths) / m
+    threshold = _config(client_id).get("burstiness_cov_threshold", 0.45)
+    if cov >= threshold:
+        return 0.0, []
+    score = max(0.0, 1.0 - (cov / threshold))
+    findings = [{
+        "cov": round(cov, 3),
+        "mean_words_per_sentence": round(m, 1),
+        "threshold": threshold,
+        "sentence_count": len(sentences),
+    }]
+    return round(score, 3), findings
+
+
+def _detect_hedging_removal(text: str, language: str, doc_type: str, client_id: str = "default") -> Tuple[float, List[dict]]:
+    """Flag documents where epistemic hedges are absent.
+
+    AI prose strips hedges ("arguably", "perhaps", "tends to") in favour of
+    declarative certainty. Density per 300-word page is compared against a
+    per-doc-type target; density below target is scored linearly.
+    """
+    target = _hedging_targets(client_id).get(doc_type, 1.0)
+    if target == 0.0:
+        return 0.0, []
+
+    words = _hedging_words(language, client_id)
+    lower = text.lower()
+    pages = max(len(text.split()) / 300, 1)
+    count = sum(len(re.findall(r"\b" + re.escape(w) + r"\b", lower)) for w in words)
+    density = count / pages
+    if density >= target:
+        return 0.0, []
+    score = min(1.0, (target - density) / target)
+    findings = [{
+        "density": round(density, 2),
+        "target": target,
+        "count_found": count,
+        "page_equivalent": round(pages, 1),
+    }]
     return round(score, 3), findings
 
 
@@ -515,6 +441,7 @@ def score_ai_patterns(
     language: str = "auto",
     threshold: float = 0.25,
     doc_type: str = "general",
+    client_id: str = "default",
 ) -> dict:
     """
     Score text against known AI writing patterns.
@@ -548,17 +475,18 @@ def score_ai_patterns(
     if not (0.0 <= threshold <= 1.0):
         return {"success": False, "error": f"Invalid threshold {threshold}. Must be between 0.0 and 1.0."}
 
-    if doc_type not in _PARA_LIMITS:
-        valid = ", ".join(sorted(_PARA_LIMITS.keys()))
+    para_limits_map = _para_limits(client_id)
+    if doc_type not in para_limits_map:
+        valid = ", ".join(sorted(para_limits_map.keys()))
         return {"success": False, "error": f"Invalid doc_type '{doc_type}'. Must be one of: {valid}."}
 
-    detected_language = _detect_language(text) if language == "auto" else language
+    detected_language = _detect_language(text, client_id) if language == "auto" else language
 
     word_count = len(text.split())
     page_equivalent = round(word_count / 300, 1)
 
-    para_limit = _PARA_LIMITS.get(doc_type, 5)
-    discursive_target = _DISCURSIVE_TARGETS.get(doc_type, 1.0)
+    para_limit = para_limits_map.get(doc_type, 5)
+    discursive_target = _discursive_targets(client_id).get(doc_type, 1.0)
 
     is_creative = doc_type in _CREATIVE_DOC_TYPES
     stanza_mode = doc_type in {
@@ -568,29 +496,38 @@ def score_ai_patterns(
 
     try:
         # Run all detectors
-        connector_score, connector_findings = _detect_connector_repetition(text, detected_language)
-        intensifier_score, intensifier_findings = _detect_hollow_intensifiers(text)
+        connector_score, connector_findings = _detect_connector_repetition(text, detected_language, client_id)
+        intensifier_score, intensifier_findings = _detect_hollow_intensifiers(text, client_id)
         if is_creative:
             grandiose_score, grandiose_findings = 0.0, []
         else:
-            grandiose_score, grandiose_findings = _detect_grandiose_openers(text, detected_language)
+            grandiose_score, grandiose_findings = _detect_grandiose_openers(text, detected_language, client_id)
         em_dash_score, em_dash_findings = _detect_em_dash_intercalation(text)
         monotony_score, monotony_findings = _detect_sentence_monotony(text)
         if is_creative:
             passive_score, passive_findings = 0.0, []
         else:
-            passive_score, passive_findings = _detect_passive_voice(text)
+            passive_score, passive_findings = _detect_passive_voice(text, client_id)
         para_len_score, para_len_findings = _detect_paragraph_length(text, max_sentences=para_limit, stanza_mode=stanza_mode)
         if doc_type in _SOCIAL_DOC_TYPES or is_creative:
             discursive_score, discursive_findings = 0.0, []
         else:
-            discursive_score, discursive_findings = _detect_discursive_deficit(text, target=discursive_target)
+            discursive_score, discursive_findings = _detect_discursive_deficit(text, target=discursive_target, client_id=client_id)
         if is_creative:
             listing_score, listing_findings = 0.0, []
             closing_score, closing_findings = 0.0, []
         else:
             listing_score, listing_findings = _detect_mechanical_listing(text)
-            closing_score, closing_findings = _detect_generic_closings(text)
+            closing_score, closing_findings = _detect_generic_closings(text, client_id)
+
+        # New detectors (Phase 2): burstiness is a universal signal; hedging is
+        # skipped for social/creative doc_types where epistemic hedges are not
+        # stylistically expected.
+        burstiness_score, burstiness_findings = _detect_sentence_burstiness(text, client_id)
+        if doc_type in _SOCIAL_DOC_TYPES or is_creative:
+            hedging_score, hedging_findings = 0.0, []
+        else:
+            hedging_score, hedging_findings = _detect_hedging_removal(text, detected_language, doc_type, client_id)
 
         categories = {
             "connector_repetition": {"score": connector_score, "findings": connector_findings},
@@ -603,6 +540,8 @@ def score_ai_patterns(
             "discursive_deficit": {"score": discursive_score, "findings": discursive_findings},
             "mechanical_listing": {"score": listing_score, "findings": listing_findings},
             "generic_closings": {"score": closing_score, "findings": closing_findings},
+            "sentence_burstiness": {"score": burstiness_score, "findings": burstiness_findings},
+            "hedging_removal": {"score": hedging_score, "findings": hedging_findings},
         }
 
         scores = [v["score"] for v in categories.values()]

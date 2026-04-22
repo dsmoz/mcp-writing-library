@@ -1,0 +1,16 @@
+{
+  "description": "PT connectors that read as AI-generated when repeated",
+  "items": [
+    "além disso",
+    "adicionalmente",
+    "ademais",
+    "em conclusão",
+    "em resumo",
+    "em primeiro lugar",
+    "em segundo lugar",
+    "em terceiro lugar",
+    "por último",
+    "igualmente",
+    "do mesmo modo"
+  ]
+}

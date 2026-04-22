@@ -48,7 +48,9 @@ Write operations on core/shared collections (`add_rubric_criterion`, `add_templa
 | `src/tools/styles` | `list_styles` | Writing style registry (14 labels across 4 categories) |
 | `src/tools/plagiarism` | `check_internal_similarity`, `check_external_similarity` | Similarity detection against library and web (pass `search_results` to score pre-fetched results) |
 | `src/tools/style_profiles` | `save_style_profile`, `load_style_profile`, `update_style_profile`, `search_style_profiles`, `list_style_profiles`, `harvest_corrections_to_profile` | Extract and retrieve writing style profiles from samples; channel-tagged |
-| `src/tools/ai_patterns` (+ poetry/song/fiction) | `score_writing_patterns` | Unified craft scorer; `mode ∈ {ai, semantic-ai, poetry, song, fiction}` |
+| `src/tools/ai_patterns` (+ poetry/song/fiction) | `score_writing_patterns` | Unified craft scorer; `mode ∈ {ai, semantic-ai, pt, poetry, song, fiction}`. Includes burstiness + hedging-removal detectors; accepts `client_id` for per-user pattern overrides |
+| `src/tools/pt_forensic` | `score_pt_forensic` | PT AI tells: juridiquês density, synthetic passive (`foi/são + -ado/ido`), nominalisation-suffix density |
+| `src/tools/pattern_store` | `load_items`, `load_values`, `add_user_item`, `remove_user_item`, `set_user_value`, `reset_user_overrides`, `list_pattern_files`, `list_user_overrides` | Two-layer pattern loader: core JSONs in `data/patterns/` merged with per-user overrides in `$PATTERNS_USER_DIR/{client_id}/` |
 | `src/tools/thesaurus` | `add_thesaurus_entry`, `search_thesaurus`, `suggest_alternatives`, `flag_vocabulary` | Vocabulary intelligence: flag AI-pattern words, suggest naturalistic alternatives (EN + PT) |
 | `src/tools/evidence` | `verify_claims`, `score_evidence_density` | Citation-based claim verification, ghost-stat detection, evidence density scoring |
 | `src/tools/rubrics` | `add_rubric_criterion`, `score_against_rubric`, `list_rubric_donors` | Donor rubric alignment; USAID/UNDP/GF/EU/general criteria |
@@ -144,6 +146,7 @@ Select the detector with `mode`:
 |------|---------------|--------------------|
 | `ai` | 10 rule-based AI-writing patterns (paragraph length, discursive deficit, etc.) | `general` |
 | `semantic-ai` | Similarity to the user's own library of known-AI passages | — (uses `top_k`) |
+| `pt` | PT forensic triad: juridiquês, synthetic passive, nominalisation density | `general` |
 | `poetry` | Poetry craft heuristics | `free-verse` |
 | `song` | Song-lyric craft heuristics | `pop-song` |
 | `fiction` | Prose-fiction craft heuristics | `short-story` |

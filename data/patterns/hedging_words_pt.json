@@ -1,0 +1,21 @@
+{
+  "description": "PT epistemic hedges; AI strips these out — their absence is the signal",
+  "items": [
+    "possivelmente",
+    "provavelmente",
+    "aparentemente",
+    "presumivelmente",
+    "talvez",
+    "porventura",
+    "tende a",
+    "parece",
+    "pode sugerir",
+    "poderia indicar",
+    "em muitos casos",
+    "em certa medida",
+    "em grande parte",
+    "pode-se argumentar",
+    "isto sugere",
+    "ao que tudo indica"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "description": "EN epistemic hedges; AI strips these out — their absence is the signal",
+  "items": [
+    "arguably",
+    "perhaps",
+    "seemingly",
+    "apparently",
+    "presumably",
+    "plausibly",
+    "possibly",
+    "tentatively",
+    "conceivably",
+    "tends to",
+    "appears to",
+    "may suggest",
+    "might indicate",
+    "in many cases",
+    "to some extent",
+    "for the most part",
+    "it could be argued",
+    "one might argue",
+    "this suggests"
+  ]
+}
