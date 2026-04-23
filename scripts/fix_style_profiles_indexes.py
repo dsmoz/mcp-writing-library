@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-One-off fix: create missing 'name' and 'channel' payload indexes
-on existing style_profiles collections.
+One-off fix: create missing payload indexes on existing style_profiles collections.
+
+Indexes are required for any payload field used in a Qdrant filter. Missing
+indexes surface as HTTP 400 "Index required but not found for <field>" when
+update_style_profile / load_style_profile / list_style_profiles filter by
+the field.
 
     uv run python scripts/fix_style_profiles_indexes.py
 """
@@ -41,7 +45,7 @@ def main():
 
     for coll in targets:
         print(f"\nFixing indexes on: {coll}")
-        for field in ("name", "channel", "client_id"):
+        for field in ("name", "channel", "client_id", "document_id"):
             try:
                 client.create_payload_index(
                     collection_name=coll,
