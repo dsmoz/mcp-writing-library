@@ -9,7 +9,7 @@ Scoring / search (12, unchanged):
 Merged CRUD / manage (7):
     manage_passage(action ∈ {add, update, delete, correction})
     manage_term(action ∈ {add, update, delete})  — share-branching preserved
-    manage_style_profile(action ∈ {save, load, search, list, harvest-corrections, inject-context})
+    manage_style_profile(action ∈ {save, load, search, list, delete, harvest-corrections, inject-context})
     search_thesaurus(query, rich=False, ...)  — rich=True = former suggest_alternatives
     manage_contributions(action ∈ {list, review})
     manage_library(action ∈ {stats, export})
@@ -164,7 +164,7 @@ def _build_mcp() -> FastMCP:
         "  1. Vocabulary review: search_terms → apply preferred term with `why` as rationale.\n"
         "  2. Seed model passages: check_internal_similarity → manage_passage(action='add').\n"
         "  3. Corrections pair: manage_passage(action='correction', original=..., corrected=...).\n"
-        "  4. Style profiles: manage_style_profile(action ∈ {save, load, search, list, harvest-corrections}).\n"
+        "  4. Style profiles: manage_style_profile(action ∈ {save, load, search, list, delete, harvest-corrections}).\n"
         "  5. Craft scoring: score_writing_patterns(mode ∈ {ai|pt|semantic-ai|poetry|song|fiction}).\n"
         "  6. Evidence: verify_claims (ghost_stat=True always blocks) + score_evidence_density.\n"
         "  7. Rubric alignment: score_against_rubric; admins add criteria via admin_add(kind='rubric').\n"
@@ -458,6 +458,7 @@ def check_structure(text: str, framework: str, doc_type: str) -> StructureCheckR
 @mcp.tool()
 def score_voice_consistency(
     sections: List[str],
+    ctx: Context,
     profile_name: Optional[str] = None,
     top_k_profile: int = 1,
 ) -> dict:
@@ -476,7 +477,12 @@ def score_voice_consistency(
         per-section drift_score / profile_score, highest_drift_section.
     """
     from src.tools.consistency import score_voice_consistency as _score
-    return _score(sections=sections, profile_name=profile_name, top_k_profile=top_k_profile)
+    return _score(
+        sections=sections,
+        profile_name=profile_name,
+        top_k_profile=top_k_profile,
+        client_id=_client_id(ctx),
+    )
 
 
 @mcp.tool()
@@ -781,6 +787,8 @@ def manage_style_profile(
     language: Optional[str] = None,
     domain: Optional[str] = None,
     min_corrections: int = 3,
+    # delete
+    document_id: Optional[str] = None,
 ) -> dict:
     """
     Manage writing style profiles (per-user, channel-tagged).
@@ -793,6 +801,9 @@ def manage_style_profile(
         load                 — Load by exact `name`.
         search               — Find profiles similar to `text`. Optional `channel` filter.
         list                 — List all profiles. Optional `channel` filter, `limit`.
+        delete               — Remove all chunks for a profile by `document_id` from the
+                               caller's per-user collection. Cross-user deletion is
+                               blocked by collection-prefix isolation.
         harvest-corrections  — Scan correction corpus and surface candidate rules to merge
                                into profile `name`. Returns candidates only — agent must
                                re-save with manage_style_profile(action='save') after review.
@@ -801,7 +812,7 @@ def manage_style_profile(
                                prompt. Research shows 3–5 excerpts give up to 23.5× style fidelity.
 
     Args:
-        action: save|load|search|list|harvest-corrections|inject-context
+        action: save|load|search|list|delete|harvest-corrections|inject-context
         name: Profile name (required by save/load/harvest-corrections)
         channel: Publishing surface (linkedin|email|report|proposal|general|...)
         style_scores, rules, anti_patterns, sample_excerpts, description, source_documents:
@@ -811,9 +822,10 @@ def manage_style_profile(
         top_k: search — results count (default 3)
         limit: list — max profiles (default 50)
         language, domain, min_corrections: harvest-corrections filters
+        document_id: delete — profile document UUID to remove (required)
 
     Returns:
-        Action-specific dict.
+        Action-specific dict. delete returns {success, document_id, chunks_deleted}.
     """
     client_id = _client_id(ctx)
 
@@ -890,7 +902,13 @@ def manage_style_profile(
         from src.tools.style_profiles import get_style_injection_context as _inject
         return _inject(name=name, client_id=client_id)
 
-    return {"success": False, "error": f"Invalid action '{action}'. Must be one of: save, load, search, list, harvest-corrections, inject-context"}
+    if action == "delete":
+        if not document_id:
+            return {"success": False, "error": "action='delete' requires 'document_id'"}
+        from src.tools.style_profiles import delete_style_profile as _delete
+        return _delete(document_id=document_id, client_id=client_id)
+
+    return {"success": False, "error": f"Invalid action '{action}'. Must be one of: save, load, search, list, delete, harvest-corrections, inject-context"}
 
 
 @mcp.tool()
