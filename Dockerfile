@@ -12,6 +12,10 @@ COPY pyproject.toml uv.lock README.md ./
 # Install all dependencies (kbase-core is vendored — no git fetch needed)
 RUN uv pip install --system -e . --no-cache-dir
 
+# Cache bust for source layer
+ARG CACHE_BUST=unset
+RUN echo "CACHE_BUST=${CACHE_BUST}"
+
 # Copy application source and vendored libraries
 COPY src/ ./src/
 COPY vendor/ ./vendor/
