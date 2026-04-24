@@ -23,7 +23,7 @@ def _style_profiles_collection(client_id: str = "default") -> str:
     return get_user_collection_names(client_id)["style_profiles"]
 
 try:
-    from kbase.vector.sync_indexing import index_document, delete_document_vectors
+    from kbase.vector.sync_indexing import index_document, delete_document_vectors, check_document_indexed
     from kbase.vector.sync_search import semantic_search
     from qdrant_client import QdrantClient
     from qdrant_client.http.models import Filter, FieldCondition, MatchValue
@@ -32,6 +32,7 @@ try:
 except ImportError:
     index_document = None  # type: ignore
     delete_document_vectors = None  # type: ignore
+    check_document_indexed = None  # type: ignore
     semantic_search = None  # type: ignore
     _qdrant_available = False
 
@@ -204,6 +205,39 @@ def load_style_profile(name: str, client_id: str = "default") -> dict:
             return qdrant_result
         logger.error("Failed to load style profile", name=name, error=str(e))
         capture_tool_error(e, tool_name="load_style_profile", name=name)
+        return {"success": False, "error": str(e)}
+
+
+def delete_style_profile(document_id: str, client_id: str = "default") -> dict:
+    """Delete all chunks for a style profile by document_id from the user's collection.
+
+    Cross-user deletion is prevented by collection-prefix isolation: the collection
+    resolves to `{client_id}_writing_style_profiles`, so callers can only delete
+    documents that live under their own tenant.
+    """
+    collection = _style_profiles_collection(client_id)
+    try:
+        if check_document_indexed is None or delete_document_vectors is None:
+            return {"success": False, "error": "kbase indexing unavailable"}
+
+        check_result = check_document_indexed(
+            collection_name=collection,
+            document_id=document_id,
+        )
+        chunks = check_result.get("chunk_count", 0)
+        if chunks == 0:
+            return {"success": True, "document_id": document_id, "chunks_deleted": 0}
+
+        delete_document_vectors(collection_name=collection, document_id=document_id)
+        return {"success": True, "document_id": document_id, "chunks_deleted": chunks}
+    except Exception as e:
+        qdrant_result = handle_qdrant_error(
+            e, tool_name="delete_style_profile", collection=collection, document_id=document_id
+        )
+        if qdrant_result is not None:
+            return qdrant_result
+        logger.error("Failed to delete style profile", error=str(e), document_id=document_id)
+        capture_tool_error(e, tool_name="delete_style_profile", document_id=document_id)
         return {"success": False, "error": str(e)}
 
 
