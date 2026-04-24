@@ -26,11 +26,13 @@ Resources (3, demoted from list_* tools):
 
 Setup is internal: setup_collections is called lazily on first write; no longer a public tool.
 """
+import json
 import os
 import sys
 import requests
 from contextvars import ContextVar
 from typing import Optional, List
+from mcp import types
 from mcp.server.fastmcp import FastMCP, Context
 
 from src.models import (
@@ -1319,7 +1321,7 @@ def start_review_session(
     items: List[dict],
     ctx: Context,
     name: Optional[str] = None,
-) -> dict:
+) -> types.CallToolResult:
     """
     Create an interactive review session and return a ui:// resource for in-chat rendering.
 
@@ -1342,7 +1344,13 @@ def start_review_session(
         The UI template is advertised on the tool descriptor via _meta.ui.resourceUri.
     """
     from src.tools.review import start_review_session as _start
-    return _start(items=items, client_id=_client_id(ctx), name=name)
+    result = _start(items=items, client_id=_client_id(ctx), name=name)
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
+        structuredContent=result,
+        _meta={"ui": {"resourceUri": "ui://review-session/panel"}},
+        isError=False,
+    )
 
 
 @mcp.tool()
