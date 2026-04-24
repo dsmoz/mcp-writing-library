@@ -32,7 +32,6 @@ import sys
 import requests
 from contextvars import ContextVar
 from typing import Optional, List
-from mcp import types
 from mcp.server.fastmcp import FastMCP, Context
 
 from src.models import (
@@ -1313,20 +1312,28 @@ def manage_patterns(
 
 
 # ===========================================================================
-# 4. REVIEW SESSION TOOLS (MCP Apps — interactive accept/reject UI)
+# 4. REVIEW SESSION TOOLS (interactive accept/reject via Claude.ai artifact)
 # ===========================================================================
 
-@mcp.tool(meta={"ui": {"resourceUri": "ui://review-session/panel"}})
+@mcp.tool()
 def start_review_session(
     items: List[dict],
     ctx: Context,
     name: Optional[str] = None,
-) -> types.CallToolResult:
+) -> dict:
     """
-    Create an interactive review session and return a ui:// resource for in-chat rendering.
+    Create an interactive review session and return a self-contained HTML artifact.
 
-    The host (Claude.ai) renders the resource as a sandboxed iframe where the user can
-    accept or reject each item. Decisions are submitted back via apply_review_decisions.
+    The returned `artifact.content` is a ready-to-render HTML document (title,
+    identifier, and type also provided). Claude.ai renders text/html artifacts
+    in a side panel where the user can accept/reject each item. On Submit, the
+    artifact posts the decisions back into the conversation via
+    window.claude.sendPrompt(); Claude then calls apply_review_decisions.
+
+    Rendering instructions: copy `artifact.content` VERBATIM into an HTML
+    artifact (do not paraphrase the HTML). Use the supplied `artifact.identifier`,
+    `artifact.title`, and `artifact.type`. The `instructions` field in the
+    response repeats these directives.
 
     Each item must have:
         type    — vocabulary_flag | passage_candidate | term_candidate
@@ -1340,16 +1347,47 @@ def start_review_session(
         name: Optional session name (auto-generated from timestamp if absent)
 
     Returns:
-        session_id, name, item_count, items (forwarded to iframe via structuredContent).
-        The UI template is advertised on the tool descriptor via _meta.ui.resourceUri.
+        success, session_id, item_count, artifact, instructions. Items are
+        inlined inside `artifact.content` and persisted in SQLite — NOT
+        duplicated in the response (keeps inline context minimal).
     """
     from src.tools.review import start_review_session as _start
-    result = _start(items=items, client_id=_client_id(ctx), name=name)
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=json.dumps(result, indent=2))],
-        structuredContent=result,
-        _meta={"ui": {"resourceUri": "ui://review-session/panel"}},
-        isError=False,
+    return _start(items=items, client_id=_client_id(ctx), name=name)
+
+
+@mcp.tool()
+def review_vocabulary(
+    text: str,
+    ctx: Context,
+    language: str = "en",
+    domain: str = "general",
+    name: Optional[str] = None,
+) -> dict:
+    """
+    Scan text for AI-pattern vocabulary and open an interactive review panel.
+
+    One-shot combo: runs flag_vocabulary server-side, builds review items per
+    flagged word, creates a session, returns the HTML artifact. Use this
+    instead of calling flag_vocabulary + start_review_session separately —
+    keeps the inline conversation free of flag dumps.
+
+    Args:
+        text:     Document or paragraph to scan
+        language: en | pt (default: en)
+        domain:   Thesaurus domain scope (default: general)
+        name:     Optional session name
+
+    Returns:
+        If flagged: same shape as start_review_session (session_id, artifact, instructions).
+        If clean: {success, flagged_count: 0, verdict: "clean"} — no artifact.
+    """
+    from src.tools.review import review_vocabulary as _rv
+    return _rv(
+        text=text,
+        client_id=_client_id(ctx),
+        language=language,
+        domain=domain,
+        name=name,
     )
 
 
@@ -1376,7 +1414,8 @@ def apply_review_decisions(
         decisions:  List of {item_id, action} dicts
 
     Returns:
-        accepted_count, rejected_count, per-item results
+        success, session_id, accepted_count, rejected_count. If any accepted
+        item failed to apply, includes error_count + errors list.
     """
     from src.tools.review import apply_review_decisions as _apply
     return _apply(
@@ -1402,17 +1441,6 @@ def list_review_sessions(
     """
     from src.tools.review import list_review_sessions_tool as _list
     return _list(client_id=_client_id(ctx), status=status)
-
-
-@mcp.resource("ui://review-session/panel", mime_type="text/html;profile=mcp-app")
-def resource_review_session() -> str:
-    """Static HTML review panel — rendered as iframe by MCP Apps hosts.
-
-    Session data (items, session_id, name) arrives via postMessage from the host
-    after the tool call completes. The iframe is preloaded once and reused.
-    """
-    from src.tools.review import get_review_session_shell
-    return get_review_session_shell()
 
 
 # ===========================================================================
