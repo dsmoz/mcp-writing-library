@@ -15,6 +15,7 @@ RUN uv pip install --system -e . --no-cache-dir
 # Copy application source and vendored libraries
 COPY src/ ./src/
 COPY vendor/ ./vendor/
+COPY data/ ./data/
 COPY main.py ./
 
 # Default to HTTP transport for Railway
