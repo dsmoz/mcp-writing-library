@@ -1,8 +1,14 @@
 """Interactive review session tools (MCP Apps).
 
-start_review_session   — create a session and return a ui:// resource URI
+start_review_session   — create a session and return structuredContent for MCP Apps panel
 apply_review_decisions — execute accepted items via underlying tools
 list_review_sessions   — list open/all sessions for the caller
+
+Architecture (canonical MCP Apps pattern):
+- Static UI resource at ui://review-session/panel (registered in server.py)
+- Tool descriptor advertises resourceUri via _meta.ui.resourceUri
+- Per-call session data (session_id, name, items) flows via structuredContent
+- Iframe receives data via postMessage from host after tool result
 """
 from typing import Optional
 from uuid import uuid4
@@ -11,18 +17,18 @@ from src.sessions.models import Decision, ReviewItem, ReviewItemType
 from src.sessions.store import create_session, list_sessions, load_session, save_decisions
 
 # ---------------------------------------------------------------------------
-# HTML panel (served via ui://review-sessions/{id})
+# Static HTML shell (served at ui://review-session/panel)
 # ---------------------------------------------------------------------------
-# User data is embedded as a JSON blob and read via textContent / DOM APIs
-# in JavaScript — never interpolated into HTML markup — so there is no XSS risk.
+# The shell loads once; session data arrives from the host via postMessage
+# after the tool returns structuredContent. No user data is ever interpolated
+# into the HTML — the iframe reads it from messages and renders via DOM APIs.
 
-_HTML_TEMPLATE = """<!DOCTYPE html>
+_HTML_SHELL = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Review Session</title>
-<!-- __DATA_PLACEHOLDER__ -->
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -55,35 +61,67 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   #submit-btn{background:#3182ce;color:#fff;border-color:#2b6cb0;padding:8px 20px;font-size:.9rem}
   #submit-btn:disabled{opacity:.4;cursor:not-allowed}
   #status-msg{font-size:.82rem;color:#68d391;margin-top:12px;display:none}
+  #empty-state{padding:40px;text-align:center;color:#718096}
 </style>
 </head>
 <body>
 <header>
-  <h1 id="session-name"></h1>
+  <h1 id="session-name">Review Session</h1>
   <span id="progress"></span>
 </header>
-<div id="items-container"></div>
-<footer>
+<div id="empty-state">Loading review items…</div>
+<div id="items-container" style="display:none"></div>
+<footer style="display:none" id="footer">
   <span id="summary"></span>
-  <button id="submit-btn" onclick="submitDecisions()">Submit decisions</button>
+  <button id="submit-btn">Submit decisions</button>
 </footer>
 <div id="status-msg"></div>
 <script>
 (function () {
-  // Data is embedded as JSON in a <script type="application/json"> element — never
-  // concatenated into markup — so user content cannot escape into HTML context.
-  const SESSION_ID = document.getElementById("session-data").dataset.id;
-  const ITEMS = JSON.parse(document.getElementById("session-items").textContent);
-  const SESSION_NAME = document.getElementById("session-data").dataset.name;
-
+  let SESSION_ID = null;
+  let ITEMS = [];
+  let SESSION_NAME = "Review Session";
   const decisions = {};
-  document.getElementById("session-name").textContent = SESSION_NAME;
 
   const TYPE_LABELS = {
     vocabulary_flag: "Vocabulary flag",
     passage_candidate: "Passage candidate",
     term_candidate: "Term candidate"
   };
+
+  function hydrate(sc) {
+    if (!sc || typeof sc !== "object") return false;
+    if (!sc.session_id || !Array.isArray(sc.items)) return false;
+    SESSION_ID = sc.session_id;
+    ITEMS = sc.items;
+    SESSION_NAME = sc.name || "Review Session";
+    document.getElementById("session-name").textContent = SESSION_NAME;
+    document.getElementById("empty-state").style.display = "none";
+    document.getElementById("items-container").style.display = "block";
+    document.getElementById("footer").style.display = "flex";
+    render();
+    return true;
+  }
+
+  function extractStructured(data) {
+    if (!data || typeof data !== "object") return null;
+    if (data.structuredContent) return data.structuredContent;
+    if (data.result && data.result.structuredContent) return data.result.structuredContent;
+    if (data.params && data.params.structuredContent) return data.params.structuredContent;
+    if (data.toolOutput) return data.toolOutput;
+    if (data.payload && data.payload.structuredContent) return data.payload.structuredContent;
+    if (data.session_id && data.items) return data;
+    return null;
+  }
+
+  window.addEventListener("message", (event) => {
+    const sc = extractStructured(event.data);
+    if (sc) hydrate(sc);
+  });
+
+  try {
+    window.parent.postMessage({ type: "ui/ready", source: "review-session" }, "*");
+  } catch (e) {}
 
   function buildItemEl(item) {
     const wrap = document.createElement("div");
@@ -135,6 +173,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 
   function render() {
     const container = document.getElementById("items-container");
+    container.innerHTML = "";
     ITEMS.forEach(item => container.appendChild(buildItemEl(item)));
     updateProgress();
   }
@@ -185,27 +224,18 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     btn.textContent = "Submitted";
   }
 
+  document.getElementById("submit-btn").addEventListener("click", submitDecisions);
   window.submitDecisions = submitDecisions;
-  render();
 })();
 </script>
 </body>
 </html>
 """
 
-def _build_html(session_id: str, session_name: str, items: list[dict]) -> str:
-    import json
 
-    # Embed data in dedicated <script> tags so user content never appears in HTML markup.
-    safe_name = session_name.replace('"', "&quot;")
-    data_block = (
-        f'<script id="session-data" data-id="{session_id}" '
-        f'data-name="{safe_name}"></script>\n'
-        f'<script id="session-items" type="application/json">'
-        f'{json.dumps(items)}'
-        f'</script>'
-    )
-    return _HTML_TEMPLATE.replace("<!-- __DATA_PLACEHOLDER__ -->", data_block, 1)
+def get_review_session_shell() -> str:
+    """Return the static HTML shell for the review panel (served at ui://review-session/panel)."""
+    return _HTML_SHELL
 
 
 # ---------------------------------------------------------------------------
@@ -217,13 +247,17 @@ def start_review_session(
     client_id: str,
     name: Optional[str] = None,
 ) -> dict:
-    """Create a review session and return _meta.ui.resourceUri for MCP Apps rendering.
+    """Create a review session; data is passed to the iframe via structuredContent.
 
     Each item must have: type (vocabulary_flag|passage_candidate|term_candidate),
     label, context, payload. An 'id' field is generated automatically if absent.
 
+    The host (Claude.ai) opens the ui://review-session/panel iframe (advertised via
+    the tool descriptor's _meta.ui.resourceUri) and forwards this return value as
+    structuredContent — the iframe reads session_id + items via postMessage.
+
     Returns:
-        session_id, name, item_count, and _meta.ui.resourceUri for iframe rendering.
+        success, session_id, name, item_count, items — all forwarded to the iframe.
     """
     parsed: list[ReviewItem] = []
     for raw in items:
@@ -240,24 +274,8 @@ def start_review_session(
         "session_id": session_id,
         "name": session_name,
         "item_count": len(parsed),
-        "_meta": {
-            "ui": {
-                "resourceUri": f"ui://review-sessions/{session_id}",
-            }
-        },
+        "items": [i.model_dump(mode="json") for i in parsed],
     }
-
-
-def get_review_session_html(session_id: str, client_id: str) -> str:
-    """Return the HTML panel for a review session (served as ui:// resource)."""
-    session = load_session(session_id, client_id)
-    if session is None:
-        return "<html><body><p>Session not found or access denied.</p></body></html>"
-    return _build_html(
-        session_id=session_id,
-        session_name=session["name"],
-        items=session["items"],
-    )
 
 
 def apply_review_decisions(

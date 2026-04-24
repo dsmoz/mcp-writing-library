@@ -1313,7 +1313,7 @@ def manage_patterns(
 # 4. REVIEW SESSION TOOLS (MCP Apps — interactive accept/reject UI)
 # ===========================================================================
 
-@mcp.tool()
+@mcp.tool(meta={"ui": {"resourceUri": "ui://review-session/panel"}})
 def start_review_session(
     items: List[dict],
     ctx: Context,
@@ -1337,7 +1337,8 @@ def start_review_session(
         name: Optional session name (auto-generated from timestamp if absent)
 
     Returns:
-        session_id, name, item_count, _meta.ui.resourceUri
+        session_id, name, item_count, items (forwarded to iframe via structuredContent).
+        The UI template is advertised on the tool descriptor via _meta.ui.resourceUri.
     """
     from src.tools.review import start_review_session as _start
     return _start(items=items, client_id=_client_id(ctx), name=name)
@@ -1394,11 +1395,15 @@ def list_review_sessions(
     return _list(client_id=_client_id(ctx), status=status)
 
 
-@mcp.resource("ui://review-sessions/{session_id}")
-def resource_review_session(session_id: str, ctx: Context) -> str:
-    """HTML review panel for a session — rendered as iframe by MCP Apps hosts."""
-    from src.tools.review import get_review_session_html as _html
-    return _html(session_id=session_id, client_id=_client_id(ctx))
+@mcp.resource("ui://review-session/panel", mime_type="text/html+skybridge")
+def resource_review_session() -> str:
+    """Static HTML review panel — rendered as iframe by MCP Apps hosts.
+
+    Session data (items, session_id, name) arrives via postMessage from the host
+    after the tool call completes. The iframe is preloaded once and reused.
+    """
+    from src.tools.review import get_review_session_shell
+    return get_review_session_shell()
 
 
 # ===========================================================================
