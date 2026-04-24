@@ -1395,7 +1395,7 @@ def list_review_sessions(
     return _list(client_id=_client_id(ctx), status=status)
 
 
-@mcp.resource("ui://review-session/panel", mime_type="text/html+skybridge")
+@mcp.resource("ui://review-session/panel", mime_type="text/html+mcp")
 def resource_review_session() -> str:
     """Static HTML review panel — rendered as iframe by MCP Apps hosts.
 
