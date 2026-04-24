@@ -12,6 +12,10 @@ COPY pyproject.toml uv.lock README.md ./
 # Install all dependencies (kbase-core is vendored — no git fetch needed)
 RUN uv pip install --system -e . --no-cache-dir
 
+# Cache bust for source layer — change this value to force fresh src copy
+ENV BUILD_TAG=2026-04-24-sentinel-v3
+RUN echo "BUILD_TAG=$BUILD_TAG"
+
 # Copy application source and vendored libraries
 COPY src/ ./src/
 COPY vendor/ ./vendor/

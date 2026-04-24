@@ -186,6 +186,7 @@ def _build_mcp() -> FastMCP:
     return FastMCP("writing-library", instructions=instructions)
 
 mcp = _build_mcp()
+print("BUILD_SENTINEL=review-tools-v2 mcp-writing-library src/server.py loaded", file=sys.stderr)
 
 
 # ===========================================================================
