@@ -1310,7 +1310,99 @@ def manage_patterns(
 
 
 # ===========================================================================
-# 4. MCP RESOURCES (demoted from list_* tools)
+# 4. REVIEW SESSION TOOLS (MCP Apps — interactive accept/reject UI)
+# ===========================================================================
+
+@mcp.tool()
+def start_review_session(
+    items: List[dict],
+    ctx: Context,
+    name: Optional[str] = None,
+) -> dict:
+    """
+    Create an interactive review session and return a ui:// resource for in-chat rendering.
+
+    The host (Claude.ai) renders the resource as a sandboxed iframe where the user can
+    accept or reject each item. Decisions are submitted back via apply_review_decisions.
+
+    Each item must have:
+        type    — vocabulary_flag | passage_candidate | term_candidate
+        label   — short description (e.g. "leverage → reinforce")
+        context — surrounding sentence for context
+        payload — full params for the apply tool (passed through unchanged on accept)
+        id      — auto-generated if absent
+
+    Args:
+        items: List of ReviewItem dicts
+        name: Optional session name (auto-generated from timestamp if absent)
+
+    Returns:
+        session_id, name, item_count, _meta.ui.resourceUri
+    """
+    from src.tools.review import start_review_session as _start
+    return _start(items=items, client_id=_client_id(ctx), name=name)
+
+
+@mcp.tool()
+def apply_review_decisions(
+    session_id: str,
+    decisions: List[dict],
+    ctx: Context,
+) -> dict:
+    """
+    Execute accepted items from a review session and persist all decisions.
+
+    Called by the review panel UI via postMessage. Each decision has:
+        item_id — the ReviewItem id
+        action  — "accept" | "reject"
+
+    Accepted passage_candidate items → manage_passage(action='add').
+    Accepted term_candidate items    → manage_term(action='add').
+    Accepted vocabulary_flag items   → acknowledged (no library write).
+    Rejected items are recorded and skipped.
+
+    Args:
+        session_id: ID returned by start_review_session
+        decisions:  List of {item_id, action} dicts
+
+    Returns:
+        accepted_count, rejected_count, per-item results
+    """
+    from src.tools.review import apply_review_decisions as _apply
+    return _apply(
+        session_id=session_id,
+        decisions_raw=decisions,
+        client_id=_client_id(ctx),
+    )
+
+
+@mcp.tool()
+def list_review_sessions(
+    ctx: Context,
+    status: str = "open",
+) -> dict:
+    """
+    List review sessions for the caller.
+
+    Args:
+        status: open | completed | all (default: open)
+
+    Returns:
+        List of sessions: id, name, status, item_count, decision_count, created_at
+    """
+    from src.tools.review import list_review_sessions_tool as _list
+    return _list(client_id=_client_id(ctx), status=status)
+
+
+@mcp.resource("ui://review-sessions/{session_id}")
+def resource_review_session(session_id: str, ctx: Context) -> str:
+    """HTML review panel for a session — rendered as iframe by MCP Apps hosts."""
+    from src.tools.review import get_review_session_html as _html
+    return _html(session_id=session_id, client_id=_client_id(ctx))
+
+
+# ===========================================================================
+# 5. MCP RESOURCES (demoted from list_* tools)
 # ===========================================================================
 
 @mcp.resource("writing-library://styles")
