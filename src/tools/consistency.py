@@ -54,6 +54,7 @@ def score_voice_consistency(
     sections: List[str],
     profile_name: Optional[str] = None,
     top_k_profile: int = 1,
+    client_id: str = "default",
 ) -> dict:
     """
     Measure how consistently a list of text sections share a voice/style.
@@ -115,7 +116,7 @@ def score_voice_consistency(
         # Step 4: Profile comparison
         if profile_name is not None:
             from src.tools.style_profiles import load_style_profile
-            profile_result = load_style_profile(name=profile_name)
+            profile_result = load_style_profile(name=profile_name, client_id=client_id)
             if not profile_result.get("success"):
                 return {
                     "success": False,
@@ -150,7 +151,7 @@ def score_voice_consistency(
         # Profile comparison skipped in fallback mode
         if profile_name is not None:
             from src.tools.style_profiles import load_style_profile
-            profile_result = load_style_profile(name=profile_name)
+            profile_result = load_style_profile(name=profile_name, client_id=client_id)
             if not profile_result.get("success"):
                 return {
                     "success": False,

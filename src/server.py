@@ -458,6 +458,7 @@ def check_structure(text: str, framework: str, doc_type: str) -> StructureCheckR
 @mcp.tool()
 def score_voice_consistency(
     sections: List[str],
+    ctx: Context,
     profile_name: Optional[str] = None,
     top_k_profile: int = 1,
 ) -> dict:
@@ -476,7 +477,12 @@ def score_voice_consistency(
         per-section drift_score / profile_score, highest_drift_section.
     """
     from src.tools.consistency import score_voice_consistency as _score
-    return _score(sections=sections, profile_name=profile_name, top_k_profile=top_k_profile)
+    return _score(
+        sections=sections,
+        profile_name=profile_name,
+        top_k_profile=top_k_profile,
+        client_id=_client_id(ctx),
+    )
 
 
 @mcp.tool()
