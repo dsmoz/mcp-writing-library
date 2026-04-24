@@ -1347,10 +1347,48 @@ def start_review_session(
         name: Optional session name (auto-generated from timestamp if absent)
 
     Returns:
-        success, session_id, name, item_count, items, artifact, instructions.
+        success, session_id, item_count, artifact, instructions. Items are
+        inlined inside `artifact.content` and persisted in SQLite — NOT
+        duplicated in the response (keeps inline context minimal).
     """
     from src.tools.review import start_review_session as _start
     return _start(items=items, client_id=_client_id(ctx), name=name)
+
+
+@mcp.tool()
+def review_vocabulary(
+    text: str,
+    ctx: Context,
+    language: str = "en",
+    domain: str = "general",
+    name: Optional[str] = None,
+) -> dict:
+    """
+    Scan text for AI-pattern vocabulary and open an interactive review panel.
+
+    One-shot combo: runs flag_vocabulary server-side, builds review items per
+    flagged word, creates a session, returns the HTML artifact. Use this
+    instead of calling flag_vocabulary + start_review_session separately —
+    keeps the inline conversation free of flag dumps.
+
+    Args:
+        text:     Document or paragraph to scan
+        language: en | pt (default: en)
+        domain:   Thesaurus domain scope (default: general)
+        name:     Optional session name
+
+    Returns:
+        If flagged: same shape as start_review_session (session_id, artifact, instructions).
+        If clean: {success, flagged_count: 0, verdict: "clean"} — no artifact.
+    """
+    from src.tools.review import review_vocabulary as _rv
+    return _rv(
+        text=text,
+        client_id=_client_id(ctx),
+        language=language,
+        domain=domain,
+        name=name,
+    )
 
 
 @mcp.tool()
@@ -1376,7 +1414,8 @@ def apply_review_decisions(
         decisions:  List of {item_id, action} dicts
 
     Returns:
-        accepted_count, rejected_count, per-item results
+        success, session_id, accepted_count, rejected_count. If any accepted
+        item failed to apply, includes error_count + errors list.
     """
     from src.tools.review import apply_review_decisions as _apply
     return _apply(

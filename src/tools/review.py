@@ -3,6 +3,7 @@
 start_review_session   — create session, return self-contained HTML artifact
 apply_review_decisions — execute accepted items via underlying tools
 list_review_sessions   — list open/all sessions for the caller
+review_vocabulary      — combo: flag_vocabulary + start_review_session server-side
 
 Rendering strategy:
 Claude.ai does not yet render MCP Apps ui:// widgets inline. Instead we return
@@ -13,6 +14,7 @@ to post the decisions back to the conversation; Claude then routes to
 apply_review_decisions.
 """
 import json
+import re
 from typing import Optional
 from uuid import uuid4
 
@@ -285,9 +287,9 @@ def start_review_session(
     label, context, payload. An 'id' field is generated if absent.
 
     Returns:
-        success, session_id, name, item_count, items, artifact {type,title,identifier,content},
-        instructions — the caller (Claude) should render `artifact.content` verbatim as
-        an HTML artifact in the conversation.
+        success, session_id, item_count, artifact, instructions.
+        Items are persisted to SQLite and inlined inside `artifact.content` —
+        NOT duplicated in the response to keep inline context minimal.
     """
     parsed: list[ReviewItem] = []
     for raw in items:
@@ -304,9 +306,7 @@ def start_review_session(
     return {
         "success": True,
         "session_id": session_id,
-        "name": session_name,
         "item_count": len(parsed),
-        "items": items_json,
         "artifact": {
             "type": "text/html",
             "identifier": f"review-{session_id}",
@@ -314,14 +314,12 @@ def start_review_session(
             "content": html,
         },
         "instructions": (
-            "Render `artifact.content` VERBATIM as an HTML artifact in this conversation "
-            f"(identifier: `review-{session_id}`, type: `text/html`, title: "
-            f"`Review: {session_name}`). Do not paraphrase, summarise, or modify the HTML. "
-            "When the user finishes reviewing and clicks Submit, the artifact will post "
-            "a message back into the conversation containing the decisions — at that "
-            "point call `apply_review_decisions` with the provided `session_id` and "
-            "`decisions` list. If the host blocks `window.claude.sendPrompt`, the artifact "
-            "shows a copy-paste fallback."
+            f"Render `artifact.content` VERBATIM as a text/html artifact (identifier "
+            f"`review-{session_id}`). Then reply with ONE short line only: "
+            f"\"Review panel open: {len(parsed)} items.\" Do NOT list, summarise, or "
+            f"paraphrase any items — the panel already shows them. When the user clicks "
+            f"Submit, the artifact posts a message with decisions; route it to "
+            f"`apply_review_decisions`."
         ),
     }
 
@@ -347,9 +345,10 @@ def apply_review_decisions(
     decisions = [Decision(**d) for d in decisions_raw]
     items_by_id = {i["id"]: i for i in session["items"]}
 
-    results = []
     accepted_count = 0
     rejected_count = 0
+    error_count = 0
+    errors: list[str] = []
 
     for decision in decisions:
         item = items_by_id.get(decision.item_id)
@@ -357,7 +356,6 @@ def apply_review_decisions(
             continue
         if decision.action == "reject":
             rejected_count += 1
-            results.append({"item_id": decision.item_id, "action": "reject"})
             continue
 
         accepted_count += 1
@@ -367,7 +365,7 @@ def apply_review_decisions(
         try:
             if item_type == ReviewItemType.passage_candidate:
                 from src.tools.passages import add_passage as _add
-                result = _add(
+                _add(
                     text=payload.get("text", ""),
                     doc_type=payload.get("doc_type", "general"),
                     language=payload.get("language", "en"),
@@ -381,7 +379,7 @@ def apply_review_decisions(
                 )
             elif item_type == ReviewItemType.term_candidate:
                 from src.tools.terms import add_term as _add
-                result = _add(
+                _add(
                     preferred=payload.get("preferred", ""),
                     avoid=payload.get("avoid", ""),
                     domain=payload.get("domain", "general"),
@@ -391,22 +389,95 @@ def apply_review_decisions(
                     example_good=payload.get("example_good", ""),
                     client_id=client_id,
                 )
-            else:
-                result = {"success": True, "note": "Vocabulary flag acknowledged"}
-
-            results.append({"item_id": decision.item_id, "action": "accept", "result": result})
+            # vocabulary_flag: acknowledgement only, no library write
         except Exception as e:
-            results.append({"item_id": decision.item_id, "action": "accept", "error": str(e)})
+            error_count += 1
+            errors.append(f"{decision.item_id}: {e}")
 
     save_decisions(session_id, client_id, decisions)
 
-    return {
+    out: dict = {
         "success": True,
         "session_id": session_id,
         "accepted_count": accepted_count,
         "rejected_count": rejected_count,
-        "results": results,
     }
+    if error_count:
+        out["error_count"] = error_count
+        out["errors"] = errors
+    return out
+
+
+def _context_snippet(text: str, headword: str, width: int = 80) -> str:
+    """Return a short snippet of text around the first match of headword."""
+    if not text or not headword:
+        return ""
+    m = re.search(re.escape(headword), text, flags=re.IGNORECASE)
+    if not m:
+        return text[: width * 2].strip()
+    start = max(0, m.start() - width)
+    end = min(len(text), m.end() + width)
+    snippet = text[start:end].strip()
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    return f"{prefix}{snippet}{suffix}"
+
+
+def review_vocabulary(
+    text: str,
+    client_id: str,
+    language: str = "en",
+    domain: str = "general",
+    name: Optional[str] = None,
+) -> dict:
+    """Combo tool: scan text for AI-pattern vocabulary, open interactive review panel.
+
+    Runs `flag_vocabulary` server-side, builds a ReviewItem per flagged word,
+    creates a review session, returns the HTML artifact. One round-trip — no
+    intermediate flag dump to the conversation.
+
+    Returns:
+        Same shape as start_review_session. If nothing flagged, returns
+        {success: True, flagged_count: 0, verdict: "clean"} with no artifact.
+    """
+    from src.tools.thesaurus import flag_vocabulary
+
+    flag_result = flag_vocabulary(text=text, language=language, domain=domain)
+    if not flag_result.get("success"):
+        return flag_result
+
+    flagged = flag_result.get("flagged", [])
+    if not flagged:
+        return {
+            "success": True,
+            "flagged_count": 0,
+            "verdict": flag_result.get("verdict", "clean"),
+            "language": language,
+            "domain": domain,
+        }
+
+    items: list[dict] = []
+    for f in flagged:
+        hw = f.get("headword", "")
+        alts = f.get("alternatives_preview", []) or []
+        alts_label = ", ".join(a.get("word", "") if isinstance(a, dict) else str(a) for a in alts[:3])
+        label = f"{hw} → {alts_label}" if alts_label else hw
+        items.append({
+            "type": "vocabulary_flag",
+            "label": label,
+            "context": _context_snippet(text, hw),
+            "payload": {
+                "headword": hw,
+                "occurrences": f.get("occurrences", 0),
+                "why_avoid": f.get("why_avoid", ""),
+                "alternatives_preview": alts,
+                "language": language,
+                "domain": domain,
+            },
+        })
+
+    session_name = name or f"Vocabulary review ({len(items)} flags)"
+    return start_review_session(items=items, client_id=client_id, name=session_name)
 
 
 def list_review_sessions_tool(client_id: str, status: str = "open") -> dict:
