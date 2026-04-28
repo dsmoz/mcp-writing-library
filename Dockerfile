@@ -19,6 +19,7 @@ RUN echo "BUILD_TAG=$BUILD_TAG"
 # Copy application source and vendored libraries
 COPY src/ ./src/
 COPY vendor/ ./vendor/
+COPY data/ ./data/
 COPY main.py ./
 
 # Default to HTTP transport for Railway
