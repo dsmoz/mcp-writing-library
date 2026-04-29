@@ -459,7 +459,9 @@ def score_ai_patterns(
     Returns:
         dict with overall_score, verdict, per-category scores and findings,
         summary, word_count, page_equivalent, doc_type.
-        Verdict: "clean" (<0.25), "review" (0.25–0.55), "ai-sounding" (≥0.55)
+        Verdict thresholds are configurable via data/patterns/config.json
+        (verdict_clean_threshold, verdict_review_threshold). Defaults: clean (<0.35),
+        review (0.35–0.55), ai-sounding (≥0.55).
     """
     if not text or not text.strip():
         return {"success": False, "error": "text cannot be empty"}
@@ -547,14 +549,19 @@ def score_ai_patterns(
         scores = [v["score"] for v in categories.values()]
         overall_score = round(sum(scores) / len(scores), 3)
 
-        if overall_score < 0.25:
+        cfg = _config(client_id)
+        clean_threshold = cfg.get("verdict_clean_threshold", 0.25)
+        review_threshold = cfg.get("verdict_review_threshold", 0.55)
+
+        if overall_score < clean_threshold:
             verdict = "clean"
-        elif overall_score < 0.55:
+        elif overall_score < review_threshold:
             verdict = "review"
         else:
             verdict = "ai-sounding"
 
         flagged = [cat for cat, data in categories.items() if data["score"] >= threshold]
+        strong_signals = [cat for cat, data in categories.items() if data["score"] >= 0.5]
         if flagged:
             summary = f"{len(flagged)} categor{'y' if len(flagged) == 1 else 'ies'} flagged: {', '.join(flagged)}."
         else:
@@ -568,6 +575,7 @@ def score_ai_patterns(
             "threshold": threshold,
             "doc_type": doc_type,
             "categories": categories,
+            "strong_signal_detectors": strong_signals,
             "summary": summary,
             "word_count": word_count,
             "page_equivalent": page_equivalent,
