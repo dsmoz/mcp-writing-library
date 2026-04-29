@@ -1,7 +1,9 @@
 {
   "description": "Scalar thresholds used by detectors",
   "values": {
-    "burstiness_cov_threshold": 0.45,
+    "burstiness_cov_threshold": 0.6,
+    "verdict_clean_threshold": 0.35,
+    "verdict_review_threshold": 0.55,
     "juridiques_hits_per_page_max": 2.0,
     "nominalisation_low": 0.15,
     "nominalisation_high": 0.4
