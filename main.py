@@ -39,10 +39,29 @@ else:
 _sentry_dsn = os.getenv("SENTRY_DSN")
 if _sentry_dsn:
     import sentry_sdk
+
+    _SDK_NOISE_LOGGERS = frozenset({
+        "mcp.server.streamable_http",
+        "mcp.server.lowlevel.server",
+    })
+    _SDK_NOISE_MESSAGES = ("ClientDisconnect", "Received exception from stream:")
+
+    def _before_send(event, hint):
+        logger = event.get("logger", "")
+        if logger in _SDK_NOISE_LOGGERS:
+            msg = event.get("message") or ""
+            exc_values = event.get("exception", {}).get("values", [])
+            exc_type = exc_values[0].get("type", "") if exc_values else ""
+            if any(m in msg for m in _SDK_NOISE_MESSAGES) or exc_type == "ClientDisconnect":
+                return None
+        return event
+
     sentry_sdk.init(
         dsn=_sentry_dsn,
         traces_sample_rate=0.1,
         environment=os.getenv("RAILWAY_ENVIRONMENT", "development"),
+        release=f"mcp-writing-library@{os.getenv('RAILWAY_GIT_COMMIT_SHA', 'unknown')}",
+        before_send=_before_send,
     )
     print("✅ Sentry error tracking enabled", file=sys.stderr)
 
