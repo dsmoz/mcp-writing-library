@@ -44,8 +44,9 @@ from src.models import (
     VocabularyFlagResult,
 )
 
-# ContextVar set by BearerAuthMiddleware from X-Client-ID header (gateway-injected)
+# ContextVars set by BearerAuthMiddleware from introspect response
 current_client_id: ContextVar[str | None] = ContextVar("current_client_id", default=None)
+current_is_admin: ContextVar[bool] = ContextVar("current_is_admin", default=False)
 
 
 def _client_id(ctx: Context) -> str:
@@ -61,13 +62,9 @@ def _client_id(ctx: Context) -> str:
 
 def _require_admin(ctx: Context) -> Optional[str]:
     """Return None if caller is admin, else an error string."""
-    admin_id = os.getenv("ADMIN_CLIENT_ID", "")
-    if not admin_id:
-        return "ADMIN_CLIENT_ID is not configured — admin tools are disabled"
-    caller = _client_id(ctx)
-    if caller != admin_id:
-        return f"Admin access required. Caller '{caller}' is not the configured admin."
-    return None
+    if current_is_admin.get(False):
+        return None
+    return "Admin access required."
 
 
 def _check_auth(token: str) -> bool:
@@ -89,16 +86,16 @@ def _oauth_introspect_url() -> str:
     return ""
 
 
-def _resolve_client_id_by_oauth_token(token: str) -> Optional[str]:
-    """Resolve tenant key via mcp-oauth-server /introspect.
+def _resolve_oauth_identity(token: str) -> tuple[Optional[str], bool]:
+    """Resolve tenant key and admin flag via mcp-oauth-server /introspect.
 
-    Prefers ``user_id`` (user-level tenancy, post-multi-device migration) and
-    falls back to ``client_id`` for legacy tokens issued before the migration.
+    Returns ``(client_id, is_admin)``. Prefers ``user_id`` (user-level tenancy,
+    post-multi-device migration) and falls back to ``client_id`` for legacy tokens.
     """
     introspect_url = _oauth_introspect_url()
     introspect_secret = os.getenv("INTROSPECT_SECRET", "").strip()
     if not token or not introspect_url or not introspect_secret:
-        return None
+        return None, False
     try:
         timeout_s = float(os.getenv("OAUTH_INTROSPECT_TIMEOUT", "3.0"))
         resp = requests.post(
@@ -108,17 +105,22 @@ def _resolve_client_id_by_oauth_token(token: str) -> Optional[str]:
             timeout=timeout_s,
         )
         if resp.status_code != 200:
-            return None
+            return None, False
         payload = resp.json()
         if not payload.get("active"):
-            return None
+            return None, False
         user_id = (payload.get("user_id") or "").strip()
-        if user_id:
-            return user_id
-        client_id = (payload.get("client_id") or "").strip()
-        return client_id or None
+        client_id = user_id or (payload.get("client_id") or "").strip() or None
+        is_admin = bool(payload.get("is_admin", False))
+        return client_id, is_admin
     except Exception:
-        return None
+        return None, False
+
+
+def _resolve_client_id_by_oauth_token(token: str) -> Optional[str]:
+    """Shim — returns only the client_id from _resolve_oauth_identity."""
+    client_id, _ = _resolve_oauth_identity(token)
+    return client_id
 
 
 class BearerAuthMiddleware:
@@ -135,7 +137,7 @@ class BearerAuthMiddleware:
             headers = dict(scope.get("headers", []))
             auth = headers.get(b"authorization", b"").decode()
             token = auth[7:] if auth.startswith("Bearer ") else ""
-            oauth_client_id = _resolve_client_id_by_oauth_token(token)
+            oauth_client_id, oauth_is_admin = _resolve_oauth_identity(token)
             if not (_check_auth(token) or oauth_client_id is not None):
                 import json as _json
                 body = _json.dumps({"error": "invalid_token", "error_description": "Authentication required"}).encode()
@@ -148,11 +150,13 @@ class BearerAuthMiddleware:
             user_id_hdr = headers.get(b"x-user-id", b"").decode().strip()
             client_id_hdr = headers.get(b"x-client-id", b"").decode().strip()
             client_id_val = user_id_hdr or client_id_hdr or oauth_client_id
-            ctx_token = current_client_id.set(client_id_val)
+            ctx_token_cid = current_client_id.set(client_id_val)
+            ctx_token_admin = current_is_admin.set(oauth_is_admin)
             try:
                 await self.app(scope, receive, send)
             finally:
-                current_client_id.reset(ctx_token)
+                current_client_id.reset(ctx_token_cid)
+                current_is_admin.reset(ctx_token_admin)
             return
         await self.app(scope, receive, send)
 
@@ -177,7 +181,7 @@ def _build_mcp() -> FastMCP:
         "writing-library://rubric-frameworks, writing-library://templates.\n\n"
         "Tenancy: per-user collections ({client_id}_writing_*) are isolated; thesaurus/rubrics/"
         "templates/terms_shared are shared. manage_term(share=True)/admin_add route to library "
-        "(admins) or the contribution queue (non-admins) based on ADMIN_CLIENT_ID. Use "
+        "(admins) or the contribution queue (non-admins) based on the caller's admin role. Use "
         "check_internal_similarity for your own library, check_external_similarity for the web via Tavily."
     )
     if transport == "http":
@@ -643,7 +647,7 @@ def manage_term(
     items: Optional[List[dict]] = None,
 ) -> dict:
     """
-    Manage terminology entries. add routes share→library|queue|personal based on ADMIN_CLIENT_ID.
+    Manage terminology entries. add routes share→library|queue|personal based on caller's admin role.
 
     Actions:
         add    — Add a term. Pass `preferred` (single) OR `items` (list).
@@ -992,8 +996,7 @@ def manage_contributions(
         Action-specific dict.
     """
     caller = _client_id(ctx)
-    admin_id = os.getenv("ADMIN_CLIENT_ID", "")
-    is_admin = bool(admin_id) and caller == admin_id
+    is_admin = _require_admin(ctx) is None
 
     if action == "list":
         from src.tools.contributions import list_contributions as _list
@@ -1050,6 +1053,11 @@ def manage_library(
     if action == "export":
         if not collection:
             return {"success": False, "error": "action='export' requires 'collection'"}
+        from src.tools.collections import get_core_collection_names
+        if collection in get_core_collection_names():
+            err = _require_admin(ctx)
+            if err:
+                return {"success": False, "error": err}
         from src.tools.export import export_library as _export
         return _export(collection=collection, output_format=output_format, client_id=client_id)
 

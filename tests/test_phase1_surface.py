@@ -494,3 +494,41 @@ def test_manage_library_invalid_action():
     out = server.manage_library(action="bogus", ctx=None)
     assert out["success"] is False
     assert "Invalid action" in out["error"]
+
+
+# export — core collection isolation
+# ---------------------------------------------------------------------------
+
+def test_manage_library_export_core_non_admin_blocked():
+    """Non-admin cannot export core collections (e.g. contributions)."""
+    with patch.object(server, "_client_id", return_value="alice"), \
+         patch.object(server, "_require_admin", return_value="Admin access required"):
+        out = server.manage_library(action="export", ctx=None, collection="contributions")
+    assert out["success"] is False
+    assert "Admin" in out["error"]
+
+
+def test_manage_library_export_core_admin_allowed():
+    """Admin can export core collections."""
+    with patch.object(server, "_client_id", return_value="admin"), \
+         patch.object(server, "_require_admin", return_value=None), \
+         patch("src.tools.export.export_library",
+               return_value={"success": True, "format": "json"}) as exporter:
+        out = server.manage_library(
+            action="export", ctx=None, collection="contributions", output_format="json",
+        )
+    assert out["success"] is True
+    exporter.assert_called_once()
+
+
+def test_manage_library_export_user_collection_non_admin_allowed():
+    """Non-admin can still export their own user collections."""
+    with patch.object(server, "_client_id", return_value="alice"), \
+         patch.object(server, "_require_admin", return_value="Admin access required"), \
+         patch("src.tools.export.export_library",
+               return_value={"success": True, "format": "json"}) as exporter:
+        out = server.manage_library(
+            action="export", ctx=None, collection="passages", output_format="json",
+        )
+    assert out["success"] is True
+    exporter.assert_called_once()
