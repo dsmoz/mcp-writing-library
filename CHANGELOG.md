@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
+## [1.8.0] - 2026-05-22
+
+### Added
+
+- `list_taxonomy` MCP tool — returns the distinct payload values actually populated in the caller's per-user collections (`{client_id}_writing_passages`, `_writing_terms`, `_writing_style_profiles`) across all filterable facets (doc_type, domain, language, style, rubric_section, tags, channel). Lets calling skills validate filter values before issuing search queries instead of trial-and-error empty results.
+- `src/tools/taxonomy.py` module with `get_distinct_values()`, `build_zero_result_hint()`, and `list_taxonomy()` helpers. Tolerates Qdrant client unavailability — returns `{}` so callers can no-op silently.
+- Zero-result `hint` field on `search_passages` and `search_terms`. When a filtered search returns `total: 0`, the response now also includes `hint.message`, `hint.filter_mismatches` (per-field requested-vs-available) and `hint.available_values` (every populated value per facet). Generated only when filters were applied. Prevents the silent-failure misread documented in the writing-library bug report (2026-05-22) where callers conflated empty filter matches with server outages.
+
+### Fixed
+
+- Documented `domain="health"` / `doc_type="annual-report"` enum values no longer return opaque empty payloads — callers now see which alternatives exist in their corpus (e.g. `domain` populated as `srhr`/`governance`/`general`). Corpus backfill and skill-enum reconciliation remain follow-up items, but the silent-failure surface is closed.
+
 ## [1.7.0] - 2026-04-14
 
 ### Added

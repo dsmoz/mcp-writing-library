@@ -169,7 +169,22 @@ def search_passages(
 
         results = results[:top_k]
 
-        return {"success": True, "results": results, "total": len(results)}
+        response: dict = {"success": True, "results": results, "total": len(results)}
+
+        if not results and (filter_conditions or style):
+            try:
+                from src.tools.taxonomy import build_zero_result_hint, PASSAGE_FACETS
+
+                hint_filters = dict(filter_conditions)
+                if style:
+                    hint_filters["style"] = style
+                hint = build_zero_result_hint(collection, hint_filters, PASSAGE_FACETS)
+                if hint:
+                    response["hint"] = hint
+            except Exception as e:
+                logger.debug("Hint generation failed", error=str(e))
+
+        return response
     except Exception as e:
         qdrant_result = handle_qdrant_error(e, tool_name="search_passages", collection=collection, client_id=client_id)
         if qdrant_result is not None:

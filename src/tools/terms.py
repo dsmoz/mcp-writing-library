@@ -168,7 +168,20 @@ def search_terms(
     merged.sort(key=lambda x: x["score"], reverse=True)
     merged = merged[:top_k]
 
-    return {"success": True, "results": merged, "total": len(merged)}
+    response: dict = {"success": True, "results": merged, "total": len(merged)}
+
+    if not merged and filter_conditions:
+        try:
+            from src.tools.taxonomy import build_zero_result_hint, TERM_FACETS
+
+            personal_collection = get_collection_names(client_id)["terms"]
+            hint = build_zero_result_hint(personal_collection, filter_conditions, TERM_FACETS)
+            if hint:
+                response["hint"] = hint
+        except Exception:
+            pass
+
+    return response
 
 
 def delete_term(document_id: str, client_id: str = "default") -> dict:

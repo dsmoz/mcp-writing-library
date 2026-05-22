@@ -50,6 +50,14 @@ flowchart TD
 | `search_terms` | `search_terms(query, domain, language, top_k)` | Search terminology dictionary for preferred vocabulary |
 | `add_term` | `add_term(preferred, avoid, domain, language, why, example_bad, example_good)` | Add a terminology entry |
 
+### Introspection
+
+| Tool | Function | Description |
+|------|----------|-------------|
+| `list_taxonomy` | `list_taxonomy()` | Return populated facet values (doc_type, domain, language, style, channel, tags, rubric_section) for the caller's per-user collections. Use before `search_*` to avoid filter/corpus mismatches. |
+
+`search_passages` and `search_terms` also include a `hint` field on zero-result responses, naming the requested filter value, the values actually populated in the corpus, and the available facet values per field. The hint is generated only when filters were applied and the corpus is reachable.
+
 ### Plagiarism & Similarity
 
 | Tool | Function | Description |
@@ -178,6 +186,7 @@ OAUTH_INTROSPECT_TIMEOUT=3.0
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.8.0 | 2026-05-22 | `list_taxonomy` tool + zero-result `hint` on `search_passages`/`search_terms` — surfaces corpus-populated facet values when filters miss |
 | 1.7.0 | 2026-04-14 | Direct OAuth token introspection auth for HTTP mode (gateway optional) |
 | 1.6.0 | 2026-04-05 | Railway-ready: X-Client-ID ContextVar, user_id→client_id rename, client_id in payload |
 | 1.5.0 | 2026-04-04 | Remove external KB coupling; admin-guard core writes; restrict export aliases |
