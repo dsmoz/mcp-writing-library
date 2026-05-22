@@ -1,10 +1,13 @@
 """
-MCP Writing Library Server — FastMCP tool definitions (21-tool surface).
+MCP Writing Library Server — FastMCP tool definitions (22-tool surface).
 
 Scoring / search (12, unchanged):
     search_passages, search_terms, check_internal_similarity, check_external_similarity,
     score_writing_patterns, verify_claims, score_evidence_density, score_against_rubric,
     check_structure, score_voice_consistency, detect_authorship_shift, flag_vocabulary
+
+Introspection (1):
+    list_taxonomy — populated facet values per caller's collections
 
 Merged CRUD / manage (7):
     manage_passage(action ∈ {add, update, delete, correction})
@@ -1449,6 +1452,25 @@ def list_review_sessions(
     """
     from src.tools.review import list_review_sessions_tool as _list
     return _list(client_id=_client_id(ctx), status=status)
+
+
+@mcp.tool()
+def list_taxonomy(ctx: Context) -> dict:
+    """
+    Return populated payload values for the caller's per-user collections.
+
+    Use this BEFORE search_passages / search_terms to discover which
+    filter values actually exist in your corpus (avoids zero-result
+    searches caused by enum/corpus mismatch).
+
+    Returns:
+        Per-collection dict mapping each facet (doc_type, domain, language,
+        style, rubric_section, tags, channel) to the sorted list of values
+        present in the caller's data. Empty lists mean no entries are tagged
+        with that facet yet.
+    """
+    from src.tools.taxonomy import list_taxonomy as _list
+    return _list(client_id=_client_id(ctx))
 
 
 # ===========================================================================

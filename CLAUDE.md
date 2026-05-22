@@ -40,8 +40,10 @@ Write operations on core/shared collections (`add_rubric_criterion`, `add_templa
 
 | Module | Functions | Description |
 |--------|-----------|-------------|
-| `src/tools/passages` | `add_passage`, `search_passages`, `update_passage`, `delete_passage`, `batch_add_passages` | Store and retrieve exemplary writing passages (per-user) |
-| `src/tools/terms` | `add_term`, `search_terms`, `update_term`, `delete_term`, `batch_add_terms` | Store and retrieve terminology dictionary entries (per-user) |
+| `src/tools/passages` | `add_passage`, `search_passages`, `update_passage`, `delete_passage`, `batch_add_passages` | Store and retrieve exemplary writing passages (per-user). `search_passages` returns a `hint` on zero-result filtered queries (see Pattern 10). |
+| `src/tools/terms` | `add_term`, `search_terms`, `update_term`, `delete_term`, `batch_add_terms` | Store and retrieve terminology dictionary entries (per-user). `search_terms` returns a `hint` on zero-result filtered queries. |
+| `src/tools/taxonomy` | `list_taxonomy`, `get_distinct_values`, `build_zero_result_hint` | Introspect populated facet values per caller's collections; underpins the zero-result hints in `search_passages` and `search_terms`. |
+| `src/tools/aliases` | `expand`, `has_alias`, `DOMAIN_ALIASES`, `DOC_TYPE_ALIASES` | Filter-value alias overlay (e.g. `domain="health"` → also matches `srhr`); `search_passages`/`search_terms` fan out queries across alias variants and merge by document_id keeping max score. |
 | `src/tools/collections` | `get_collection_names`, `get_user_collection_names`, `get_core_collection_names`, `setup_collections`, `setup_user_collections`, `get_stats` | Manage Qdrant collections; client_id-aware |
 | `src/tools/contributions` | `contribute`, `list_contributions`, `review_contribution` | Moderation queue; non-admin `add_term/add_thesaurus_entry/add_rubric_criterion/add_template` calls are auto-routed here |
 | `src/tools/export` | `export_library` | Export any collection to JSON or CSV |
@@ -224,6 +226,47 @@ result = suggest_alternatives(word="alavancar", language="pt", domain="general")
 
 `flag_vocabulary` complements `score_writing_patterns(mode="ai")` (structural patterns) with lexical flagging.
 `suggest_alternatives` falls back to `search_terms` when word is not in the thesaurus.
+
+## Pattern 11 — Filter Aliases
+
+The documented skill enum is broader than the corpus tagging. `search_passages` and `search_terms` apply an alias overlay so callers can use the documented vocabulary even when corpus entries are tagged with the historical value:
+
+| Field | Documented value | Also matches |
+|-------|------------------|--------------|
+| `domain` | `health` | `srhr` |
+| `doc_type` | `annual-report` | `report`, `monitoring-report` |
+
+Mechanics: when a filter value has aliases, the search runs once per concrete combination and merges by `document_id`, keeping the highest score. Cost is bounded — alias fan-out is small (<= 4 values per field).
+
+To add a new alias, edit `DOMAIN_ALIASES` / `DOC_TYPE_ALIASES` in `src/tools/aliases.py`. No upstream-kbase changes required.
+
+## Pattern 10 — Taxonomy Introspection and Zero-Result Hints
+
+Before issuing filtered searches, validate that the filter vocabulary you intend to use is actually populated in the caller's corpus:
+
+```python
+tax = list_taxonomy()
+# tax["passages"]["values"] -> {"doc_type": [...], "domain": [...], "language": [...],
+#                               "style": [...], "rubric_section": [...], "tags": [...]}
+# tax["terms"]["values"]    -> {"domain": [...], "language": [...]}
+# tax["style_profiles"]["values"] -> {"channel": [...]}
+```
+
+When a filtered search misses, the response surfaces what went wrong instead of returning an opaque empty array:
+
+```python
+search_passages(query="annual report HIV", domain="health")
+# {
+#   "success": true, "results": [], "total": 0,
+#   "hint": {
+#     "message": "No entries matched domain='health'. Available: ['general','governance','m-and-e','srhr']",
+#     "filter_mismatches": {"domain": {"requested": "health", "available": ["general","governance","m-and-e","srhr"]}},
+#     "available_values": {"doc_type": [...], "domain": [...], ...}
+#   }
+# }
+```
+
+Hints are generated only when filters were applied and the Qdrant client is reachable. If the corpus is empty, the hint says so.
 
 ## Common Pitfalls
 

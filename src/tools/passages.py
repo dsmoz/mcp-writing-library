@@ -122,6 +122,8 @@ def search_passages(
     ensure_user_collections_once(client_id)
     collection = get_collection_names(client_id)["passages"]
 
+    from src.tools.aliases import expand as _expand_alias
+
     filter_conditions = {}
     if doc_type:
         filter_conditions["doc_type"] = doc_type
@@ -132,16 +134,46 @@ def search_passages(
     if rubric_section:
         filter_conditions["rubric_section"] = rubric_section
 
+    # Expand aliased filter values (e.g. domain="health" -> ["health", "srhr"]).
+    # Build the cartesian product of expansions so we can issue one
+    # semantic_search per concrete filter combination, then merge.
+    alias_axes: list[tuple[str, list[str]]] = []
+    for k, v in filter_conditions.items():
+        alias_axes.append((k, _expand_alias(k, v)))
+
+    def _filter_variants() -> list[dict]:
+        if not alias_axes:
+            return [{}]
+        variants: list[dict] = [{}]
+        for key, values in alias_axes:
+            new_variants = []
+            for v in values:
+                for existing in variants:
+                    new = dict(existing)
+                    new[key] = v
+                    new_variants.append(new)
+            variants = new_variants
+        return variants
+
     # Over-fetch when style post-filtering is needed (reduces result count)
     fetch_k = top_k * 3 if style else top_k
 
     try:
-        raw_results = semantic_search(
-            collection_name=collection,
-            query=query,
-            limit=fetch_k,
-            filter_conditions=filter_conditions if filter_conditions else None,
-        )
+        variants = _filter_variants()
+        merged_by_doc: dict[str, dict] = {}
+        for variant in variants:
+            raw_results = semantic_search(
+                collection_name=collection,
+                query=query,
+                limit=fetch_k,
+                filter_conditions=variant if variant else None,
+            )
+            for r in raw_results:
+                doc_id = r.get("document_id") or r.get("id")
+                prev = merged_by_doc.get(doc_id)
+                if prev is None or r.get("score", 0) > prev.get("score", 0):
+                    merged_by_doc[doc_id] = r
+        raw_results = sorted(merged_by_doc.values(), key=lambda r: r.get("score", 0), reverse=True)[:fetch_k]
 
         results = []
         for r in raw_results:
@@ -169,7 +201,22 @@ def search_passages(
 
         results = results[:top_k]
 
-        return {"success": True, "results": results, "total": len(results)}
+        response: dict = {"success": True, "results": results, "total": len(results)}
+
+        if not results and (filter_conditions or style):
+            try:
+                from src.tools.taxonomy import build_zero_result_hint, PASSAGE_FACETS
+
+                hint_filters = dict(filter_conditions)
+                if style:
+                    hint_filters["style"] = style
+                hint = build_zero_result_hint(collection, hint_filters, PASSAGE_FACETS)
+                if hint:
+                    response["hint"] = hint
+            except Exception as e:
+                logger.debug("Hint generation failed", error=str(e))
+
+        return response
     except Exception as e:
         qdrant_result = handle_qdrant_error(e, tool_name="search_passages", collection=collection, client_id=client_id)
         if qdrant_result is not None:
