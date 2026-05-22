@@ -186,7 +186,7 @@ OAUTH_INTROSPECT_TIMEOUT=3.0
 
 | Version | Date | Summary |
 |---------|------|---------|
-| 1.8.0 | 2026-05-22 | `list_taxonomy` tool + zero-result `hint` on `search_passages`/`search_terms` — surfaces corpus-populated facet values when filters miss |
+| 1.8.0 | 2026-05-22 | Filter aliases (`domain="health"` → `srhr`, `doc_type="annual-report"` → `report`/`monitoring-report`); `list_taxonomy` tool; zero-result `hint` on `search_passages`/`search_terms` |
 | 1.7.0 | 2026-04-14 | Direct OAuth token introspection auth for HTTP mode (gateway optional) |
 | 1.6.0 | 2026-04-05 | Railway-ready: X-Client-ID ContextVar, user_id→client_id rename, client_id in payload |
 | 1.5.0 | 2026-04-04 | Remove external KB coupling; admin-guard core writes; restrict export aliases |

@@ -114,6 +114,7 @@ def search_terms(
     entry is returned and the shared duplicate is dropped.
     """
     from src.tools.collections import get_core_collection_names
+    from src.tools.aliases import expand as _expand_alias
 
     filter_conditions: dict = {}
     if domain:
@@ -121,14 +122,36 @@ def search_terms(
     if language:
         filter_conditions["language"] = language
 
+    # Expand aliased filter values (e.g. domain="health" -> ["health", "srhr"]).
+    alias_axes = [(k, _expand_alias(k, v)) for k, v in filter_conditions.items()]
+
+    def _variants() -> list[dict]:
+        if not alias_axes:
+            return [{}]
+        variants: list[dict] = [{}]
+        for key, values in alias_axes:
+            variants = [dict(existing, **{key: v}) for v in values for existing in variants]
+        return variants
+
     def _fetch(collection: str, source: str) -> list:
+        merged: dict[str, dict] = {}
+        for variant in _variants():
+            try:
+                raw = semantic_search(
+                    collection_name=collection,
+                    query=query,
+                    limit=top_k,
+                    filter_conditions=variant if variant else None,
+                )
+            except Exception:
+                continue
+            for r in raw:
+                doc_id = r.get("document_id") or r.get("id")
+                prev = merged.get(doc_id)
+                if prev is None or r.get("score", 0) > prev.get("score", 0):
+                    merged[doc_id] = r
+        raw = sorted(merged.values(), key=lambda x: x.get("score", 0), reverse=True)[:top_k]
         try:
-            raw = semantic_search(
-                collection_name=collection,
-                query=query,
-                limit=top_k,
-                filter_conditions=filter_conditions if filter_conditions else None,
-            )
             out = []
             for r in raw:
                 meta = r.get("metadata", {})

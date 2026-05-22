@@ -7,13 +7,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ### Added
 
+- `src/tools/aliases.py` — filter-value alias map (`DOMAIN_ALIASES`, `DOC_TYPE_ALIASES`) plus `expand(field, value)`. Documented enum values that the corpus does not (yet) tag are expanded to the populated equivalents at query time. Initial aliases: `domain="health"` → also matches `srhr`; `doc_type="annual-report"` → also matches `report` and `monitoring-report`. Adding new aliases is a one-line edit to the maps; no upstream-kbase changes required.
+- `search_passages` and `search_terms` now fan out filtered queries across alias variants (cartesian product) and merge by `document_id` keeping the max score. Result is that callers using the documented skill vocabulary get matches against the corpus's actual tags. Single-search behaviour is preserved when no alias applies.
 - `list_taxonomy` MCP tool — returns the distinct payload values actually populated in the caller's per-user collections (`{client_id}_writing_passages`, `_writing_terms`, `_writing_style_profiles`) across all filterable facets (doc_type, domain, language, style, rubric_section, tags, channel). Lets calling skills validate filter values before issuing search queries instead of trial-and-error empty results.
 - `src/tools/taxonomy.py` module with `get_distinct_values()`, `build_zero_result_hint()`, and `list_taxonomy()` helpers. Tolerates Qdrant client unavailability — returns `{}` so callers can no-op silently.
 - Zero-result `hint` field on `search_passages` and `search_terms`. When a filtered search returns `total: 0`, the response now also includes `hint.message`, `hint.filter_mismatches` (per-field requested-vs-available) and `hint.available_values` (every populated value per facet). Generated only when filters were applied. Prevents the silent-failure misread documented in the writing-library bug report (2026-05-22) where callers conflated empty filter matches with server outages.
 
 ### Fixed
 
-- Documented `domain="health"` / `doc_type="annual-report"` enum values no longer return opaque empty payloads — callers now see which alternatives exist in their corpus (e.g. `domain` populated as `srhr`/`governance`/`general`). Corpus backfill and skill-enum reconciliation remain follow-up items, but the silent-failure surface is closed.
+- Documented `domain="health"` and `doc_type="annual-report"` filter values now return matching content from the corpus via the alias overlay — the skill-facing vocabulary works as advertised without forcing a corpus retag. When a filter combination still yields zero hits (e.g. truly unpopulated facet), the response carries a `hint` enumerating what is populated.
 
 ## [1.7.0] - 2026-04-14
 
