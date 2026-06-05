@@ -54,6 +54,12 @@ if _sentry_dsn:
             exc_type = exc_values[0].get("type", "") if exc_values else ""
             if any(m in msg for m in _SDK_NOISE_MESSAGES) or exc_type == "ClientDisconnect":
                 return None
+
+        # Drop benign anyio stream-teardown noise (check all values in the exception chain)
+        exc_values = event.get("exception", {}).get("values", [])
+        if any(v.get("type") in ("ClosedResourceError", "BrokenResourceError") for v in exc_values):
+            return None
+
         return event
 
     sentry_sdk.init(
