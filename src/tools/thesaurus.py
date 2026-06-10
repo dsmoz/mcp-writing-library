@@ -10,7 +10,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
-from src.tools.collections import get_collection_names
+from src.tools.collections import get_collection_names, ensure_core_collection_indexes_once
 from src.tools.qdrant_errors import handle_qdrant_error
 from src.tools.registry import VALID_DOMAINS, VALID_LANGUAGES
 
@@ -154,6 +154,7 @@ def search_thesaurus(
         return {"success": False, "error": "query cannot be empty"}
 
     collection = get_collection_names()["thesaurus"]
+    ensure_core_collection_indexes_once()
     filter_conditions = {}
     if language:
         filter_conditions["language"] = language

@@ -113,8 +113,11 @@ def search_terms(
     Personal terms take precedence — if the same preferred term appears in both, the personal
     entry is returned and the shared duplicate is dropped.
     """
-    from src.tools.collections import get_core_collection_names
+    from src.tools.collections import get_core_collection_names, ensure_core_collection_indexes_once
     from src.tools.aliases import expand as _expand_alias
+
+    if include_shared:
+        ensure_core_collection_indexes_once()
 
     filter_conditions: dict = {}
     if domain:

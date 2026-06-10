@@ -666,15 +666,26 @@ def ensure_collection(
                 mode="dense only",
             )
 
-        # Create payload indexes for filterable fields
+        # Create payload indexes for every field any tool filters on. Qdrant
+        # raises HTTP 400 ("Index required but not found") on a filter against
+        # an unindexed field, so index the full superset across all collection
+        # types up front. Indexing a field absent from a given collection is a
+        # cheap no-op, so over-indexing here is harmless.
         from qdrant_client.models import PayloadSchemaType
-        for field in ("language", "domain", "doc_type", "name", "channel", "client_id"):
+        index_fields = (
+            "language", "domain", "doc_type", "name", "channel", "client_id",
+            # rubrics / templates filter fields
+            "framework", "section", "rubric_section", "entry_type",
+            # contributions (moderation queue) filter fields
+            "status", "target_collection", "contributed_by", "contribution_id",
+        )
+        for field in index_fields:
             client.create_payload_index(
                 collection_name=collection_name,
                 field_name=field,
                 field_schema=PayloadSchemaType.KEYWORD,
             )
-        logger.info("Payload indexes created", collection=collection_name)
+        logger.info("Payload indexes created", collection=collection_name, count=len(index_fields))
 
         return True
 

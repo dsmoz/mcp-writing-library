@@ -6,7 +6,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
-from src.tools.collections import get_collection_names
+from src.tools.collections import get_collection_names, ensure_core_collection_indexes_once
 from src.tools.qdrant_errors import handle_qdrant_error
 
 logger = structlog.get_logger(__name__)
@@ -62,6 +62,7 @@ def add_rubric_criterion(
 
     document_id = str(uuid4())
     collection = get_collection_names()["rubrics"]
+    ensure_core_collection_indexes_once()
     title = f"[{framework.upper()} | {section}] {criterion[:60]}"
     metadata = {
         "framework": framework,
@@ -127,6 +128,7 @@ def score_against_rubric(
         return {"success": False, "error": "kbase library is not available"}
 
     collection = get_collection_names()["rubrics"]
+    ensure_core_collection_indexes_once()
 
     filter_conditions: dict = {"framework": framework}
     if section:

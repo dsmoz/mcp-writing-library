@@ -78,3 +78,66 @@ def test_ensure_user_collections_once_tolerates_existing_indexes():
     with patch.object(collections_mod, "setup_user_collections", return_value={}):
         with patch("kbase.vector.sync_client.get_qdrant_client", return_value=mock_client):
             collections_mod.ensure_user_collections_once("dup")  # must not raise
+
+
+def test_ensure_core_collection_indexes_once_creates_rubric_filter_indexes():
+    """Bug 1 regression: score_against_rubric filters framework + section on
+    writing_rubrics, which Qdrant rejects with HTTP 400 unless those fields are
+    keyword-indexed. Core collections are seeded outside the per-user lazy path,
+    so a dedicated runtime migration must create the indexes.
+    """
+    from src.tools import collections as collections_mod
+
+    collections_mod._core_indexes_initialized = False
+
+    mock_client = MagicMock()
+
+    with patch("kbase.vector.sync_client.get_qdrant_client", return_value=mock_client):
+        collections_mod.ensure_core_collection_indexes_once()
+
+    indexed = {
+        (call.kwargs["collection_name"], call.kwargs["field_name"])
+        for call in mock_client.create_payload_index.call_args_list
+    }
+
+    # The HTTP 400 from Sentry was on framework; section is the other filter on
+    # the same tool and must be covered too.
+    assert ("writing_rubrics", "framework") in indexed
+    assert ("writing_rubrics", "section") in indexed
+    # Other core collections that tools filter on are covered in the same pass.
+    assert ("writing_templates", "framework") in indexed
+    assert ("writing_templates", "doc_type") in indexed
+    assert ("writing_contributions", "status") in indexed
+    assert ("writing_contributions", "target_collection") in indexed
+    assert ("writing_terms_shared", "language") in indexed
+    assert ("writing_terms_shared", "domain") in indexed
+
+    # Flag latches after a clean pass, so the next call is a no-op.
+    assert collections_mod._core_indexes_initialized is True
+
+
+def test_ensure_core_collection_indexes_once_is_idempotent():
+    """Second call must not touch Qdrant once the flag is latched."""
+    from src.tools import collections as collections_mod
+
+    collections_mod._core_indexes_initialized = True  # already migrated
+
+    mock_client = MagicMock()
+    with patch("kbase.vector.sync_client.get_qdrant_client", return_value=mock_client):
+        collections_mod.ensure_core_collection_indexes_once()
+
+    mock_client.create_payload_index.assert_not_called()
+
+
+def test_ensure_core_collection_indexes_once_does_not_latch_on_failure():
+    """A transient Qdrant outage must leave the flag unset so the migration
+    retries on the next call instead of permanently re-hiding the HTTP 400.
+    """
+    from src.tools import collections as collections_mod
+
+    collections_mod._core_indexes_initialized = False
+
+    with patch("kbase.vector.sync_client.get_qdrant_client", side_effect=Exception("connection refused")):
+        collections_mod.ensure_core_collection_indexes_once()  # must not raise
+
+    assert collections_mod._core_indexes_initialized is False
