@@ -126,6 +126,47 @@ def _resolve_client_id_by_oauth_token(token: str) -> Optional[str]:
     return client_id
 
 
+class ResponseGuardMiddleware:
+    """ASGI middleware — prevents duplicate http.response.start messages.
+
+    Guards against SDK exception handlers sending duplicate response messages.
+    Tracks per-request state to drop duplicate http.response.start + body.
+    """
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        started = False
+        suppressing = False
+
+        async def wrapped_send(message):
+            nonlocal started, suppressing
+            msg_type = message.get("type")
+
+            if msg_type == "http.response.start":
+                if started:
+                    # Duplicate start — suppress and log
+                    suppressing = True
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Dropping duplicate http.response.start message"
+                    )
+                    return
+                started = True
+                suppressing = False
+            elif suppressing:
+                # Skip any message while suppressing (e.g., body after dropped start)
+                return
+
+            await send(message)
+
+        await self.app(scope, receive, wrapped_send)
+
+
 class BearerAuthMiddleware:
     """ASGI middleware — validates bearer token and extracts X-Client-ID from gateway."""
     def __init__(self, app):

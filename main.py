@@ -84,8 +84,8 @@ def main():
             host = os.getenv("HOST", "0.0.0.0")
             print(f"🌐 HTTP transport on {host}:{port}", file=sys.stderr)
             import uvicorn
-            from src.server import BearerAuthMiddleware
-            app = BearerAuthMiddleware(mcp.streamable_http_app())
+            from src.server import ResponseGuardMiddleware, BearerAuthMiddleware
+            app = ResponseGuardMiddleware(BearerAuthMiddleware(mcp.streamable_http_app()))
             uvicorn.run(app, host=host, port=port)
         else:
             mcp.run()
