@@ -9,7 +9,7 @@ def test_list_styles_returns_all_categories():
     assert "tonal" in result["styles"]
     assert "source" in result["styles"]
     assert "anti-pattern" in result["styles"]
-    assert result["total"] == 14
+    assert result["total"] == 22
 
 
 def test_valid_styles_set_matches_styles_dict():
