@@ -194,8 +194,14 @@ class BearerAuthMiddleware:
             user_id_hdr = headers.get(b"x-user-id", b"").decode().strip()
             client_id_hdr = headers.get(b"x-client-id", b"").decode().strip()
             client_id_val = user_id_hdr or client_id_hdr or oauth_client_id
+            # Admin status: in gateway-routed mode the Authorization bearer is the
+            # shared upstream API key, not the user's token, so introspecting it
+            # never yields the caller's admin flag. The gateway resolves it and
+            # forwards X-Is-Admin (mirroring the X-User-ID tenancy header). Fall
+            # back to the introspected token for direct, non-gateway callers.
+            is_admin_hdr = headers.get(b"x-is-admin", b"").decode().strip().lower() == "true"
             ctx_token_cid = current_client_id.set(client_id_val)
-            ctx_token_admin = current_is_admin.set(oauth_is_admin)
+            ctx_token_admin = current_is_admin.set(is_admin_hdr or oauth_is_admin)
             try:
                 await self.app(scope, receive, send)
             finally:

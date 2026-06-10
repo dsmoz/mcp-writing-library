@@ -233,33 +233,50 @@ def list_contributions(
 
         scroll_filter = Filter(must=must_conditions) if must_conditions else None
 
-        results, _ = client.scroll(
-            collection_name=_contributions_collection(),
-            scroll_filter=scroll_filter,
-            limit=limit,
-            with_payload=True,
-            with_vectors=False,
-        )
+        # A single contribution is stored as one Qdrant point per content chunk
+        # (index_document chunks the entry), so a multi-chunk entry has several
+        # points sharing one contribution_id. Page through ALL matching points
+        # and collapse by contribution_id so callers see logical contributions,
+        # not raw chunks. `limit` then bounds logical contributions, not points.
+        seen: dict = {}
+        offset = None
+        while True:
+            results, offset = client.scroll(
+                collection_name=_contributions_collection(),
+                scroll_filter=scroll_filter,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in results:
+                p = point.payload or {}
+                # Fall back to the point id when contribution_id is missing so a
+                # malformed legacy point still surfaces instead of vanishing.
+                cid = p.get("contribution_id") or f"_pt_{point.id}"
+                if cid in seen:
+                    continue
+                seen[cid] = {
+                    "contribution_id": p.get("contribution_id"),
+                    "contributed_by": p.get("contributed_by"),
+                    "target": p.get("target_collection"),
+                    "status": p.get("status"),
+                    "submitted_at": p.get("submitted_at"),
+                    "reviewed_at": p.get("reviewed_at"),
+                    "reviewed_by": p.get("reviewed_by"),
+                    "rejection_reason": p.get("rejection_reason"),
+                    "note": p.get("note", ""),
+                    "payload": json.loads(p.get("payload_json", "{}")),
+                }
+            if offset is None:
+                break
 
-        contributions = []
-        for point in results:
-            p = point.payload or {}
-            entry = {
-                "contribution_id": p.get("contribution_id"),
-                "contributed_by": p.get("contributed_by"),
-                "target": p.get("target_collection"),
-                "status": p.get("status"),
-                "submitted_at": p.get("submitted_at"),
-                "reviewed_at": p.get("reviewed_at"),
-                "reviewed_by": p.get("reviewed_by"),
-                "rejection_reason": p.get("rejection_reason"),
-                "note": p.get("note", ""),
-                "payload": json.loads(p.get("payload_json", "{}")),
-            }
-            contributions.append(entry)
+        contributions = list(seen.values())
 
-        # Sort by submitted_at descending
+        # Sort by submitted_at descending, then bound to the requested limit.
         contributions.sort(key=lambda x: x.get("submitted_at") or "", reverse=True)
+        if limit is not None and limit > 0:
+            contributions = contributions[:limit]
 
         return {"success": True, "contributions": contributions, "total": len(contributions)}
 
@@ -308,23 +325,33 @@ def review_contribution(
 
     try:
         client = get_qdrant_client()
-        results, _ = client.scroll(
-            collection_name=_contributions_collection(),
-            scroll_filter=Filter(
-                must=[FieldCondition(
-                    key="contribution_id", match=MatchValue(value=contribution_id)
-                )]
-            ),
-            limit=1,
-            with_payload=True,
-            with_vectors=False,
-        )
+        # A contribution may span several Qdrant points (one per content chunk)
+        # that share contribution_id. Page through ALL of them so the status
+        # flip covers every twin — flipping only one leaves orphan points stuck
+        # at "pending" that resurface in the queue.
+        points = []
+        offset = None
+        while True:
+            batch, offset = client.scroll(
+                collection_name=_contributions_collection(),
+                scroll_filter=Filter(
+                    must=[FieldCondition(
+                        key="contribution_id", match=MatchValue(value=contribution_id)
+                    )]
+                ),
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            points.extend(batch)
+            if offset is None:
+                break
 
-        if not results:
+        if not points:
             return {"success": False, "error": f"Contribution '{contribution_id}' not found"}
 
-        point = results[0]
-        p = point.payload or {}
+        p = points[0].payload or {}
 
         if p.get("status") != "pending":
             return {
@@ -336,7 +363,7 @@ def review_contribution(
         payload = json.loads(p.get("payload_json", "{}"))
         now = _now_iso()
 
-        # Update the contribution record status
+        # Flip status on every twin point in one call.
         client.set_payload(
             collection_name=_contributions_collection(),
             payload={
@@ -345,9 +372,10 @@ def review_contribution(
                 "reviewed_by": reviewed_by,
                 "rejection_reason": rejection_reason if action == "reject" else None,
             },
-            points=[point.id],
+            points=[pt.id for pt in points],
         )
 
+        # Publish exactly once regardless of how many points back the entry.
         if action == "publish":
             _publish_to_shared(target, payload, contribution_id)
 
