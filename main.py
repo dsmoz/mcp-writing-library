@@ -47,17 +47,24 @@ if _sentry_dsn:
     _SDK_NOISE_MESSAGES = ("ClientDisconnect", "Received exception from stream:")
 
     def _before_send(event, hint):
+        """Drop benign stream-lifecycle errors and SDK noise.
+
+        Filters:
+        1. SDK logger patterns (ClientDisconnect, Received exception from stream:)
+        2. Exception types: ClosedResourceError, BrokenResourceError, EndOfStream, ConnectionResetError
+        """
         logger = event.get("logger", "")
         if logger in _SDK_NOISE_LOGGERS:
             msg = event.get("message") or ""
             exc_values = event.get("exception", {}).get("values", [])
             exc_type = exc_values[0].get("type", "") if exc_values else ""
-            if any(m in msg for m in _SDK_NOISE_MESSAGES) or exc_type == "ClientDisconnect":
+            if any(m in msg for m in _SDK_NOISE_MESSAGES) or exc_type in ("ClientDisconnect", "ClosedResourceError", "BrokenResourceError", "EndOfStream", "ConnectionResetError"):
                 return None
 
         # Drop benign anyio stream-teardown noise (check all values in the exception chain)
         exc_values = event.get("exception", {}).get("values", [])
-        if any(v.get("type") in ("ClosedResourceError", "BrokenResourceError") for v in exc_values):
+        benign_exc_types = {"ClosedResourceError", "BrokenResourceError", "EndOfStream", "ConnectionResetError"}
+        if any(v.get("type") in benign_exc_types for v in exc_values):
             return None
 
         return event
