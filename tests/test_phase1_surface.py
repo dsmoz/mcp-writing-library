@@ -105,55 +105,57 @@ def test_manage_term_invalid_action():
 # admin_add(kind="thesaurus")
 # ---------------------------------------------------------------------------
 
-def test_admin_add_thesaurus_admin_routes_library():
-    with patch.object(server, "_client_id", return_value="admin-1"), \
-         patch.object(server, "_require_admin", return_value=None), \
-         patch("src.tools.thesaurus.add_thesaurus_entry", return_value=_ok()) as direct:
+def test_admin_add_thesaurus_routes_caller_collection():
+    """Per-user thesaurus: writes to caller's per-user collection (no queue)."""
+    with patch.object(server, "_client_id", return_value="alice"), \
+         patch("src.tools.thesaurus.add_thesaurus_entry",
+               return_value={"success": True, "document_id": "doc-1"}) as direct:
         result = server.admin_add(kind="thesaurus", ctx=None, headword="leverage")
-    assert result["routed_to"] == "library"
+    assert result["routed_to"] == "caller_collection"
     direct.assert_called_once()
+    assert direct.call_args.kwargs["client_id"] == "alice"
 
 
-def test_admin_add_thesaurus_non_admin_routes_queue():
+def test_admin_add_thesaurus_non_admin_routes_caller_collection():
+    """Per-user thesaurus: non-admin also writes to their own collection (no queue)."""
     with patch.object(server, "_client_id", return_value="bob"), \
-         patch.object(server, "_require_admin", return_value="no"), \
-         patch.object(server, "_notify_contribution"), \
-         patch("src.tools.contributions.contribute_thesaurus_entry",
-               return_value={"success": True, "contribution_id": "c-2"}) as contrib:
+         patch("src.tools.thesaurus.add_thesaurus_entry",
+               return_value={"success": True, "document_id": "doc-2"}) as direct:
         result = server.admin_add(kind="thesaurus", ctx=None, headword="leverage", note="ai-ish")
-    assert result["routed_to"] == "queue"
-    contrib.assert_called_once()
-    assert contrib.call_args.kwargs["contributed_by"] == "bob"
+    assert result["routed_to"] == "caller_collection"
+    direct.assert_called_once()
+    assert direct.call_args.kwargs["client_id"] == "bob"
 
 
 # ---------------------------------------------------------------------------
 # admin_add(kind="rubric")
 # ---------------------------------------------------------------------------
 
-def test_admin_add_rubric_admin_routes_library():
+def test_admin_add_rubric_routes_caller_collection():
+    """Per-user rubric: writes to caller's per-user collection (no queue)."""
     with patch.object(server, "_client_id", return_value="admin-1"), \
-         patch.object(server, "_require_admin", return_value=None), \
-         patch("src.tools.rubrics.add_rubric_criterion", return_value=_ok()) as direct:
+         patch("src.tools.rubrics.add_rubric_criterion",
+               return_value={"success": True, "document_id": "doc-3"}) as direct:
         result = server.admin_add(
             kind="rubric", ctx=None, framework="usaid",
             section="technical-approach", criterion="Clear theory of change",
         )
-    assert result["routed_to"] == "library"
+    assert result["routed_to"] == "caller_collection"
     direct.assert_called_once()
+    assert direct.call_args.kwargs["client_id"] == "admin-1"
 
 
-def test_admin_add_rubric_non_admin_routes_queue():
+def test_admin_add_rubric_non_admin_routes_caller_collection():
+    """Per-user rubric: non-admin also writes to their own collection (no queue)."""
     with patch.object(server, "_client_id", return_value="bob"), \
-         patch.object(server, "_require_admin", return_value="no"), \
-         patch.object(server, "_notify_contribution"), \
-         patch("src.tools.contributions.contribute_rubric",
-               return_value={"success": True, "contribution_id": "c-3"}) as contrib:
+         patch("src.tools.rubrics.add_rubric_criterion",
+               return_value={"success": True, "document_id": "doc-4"}) as direct:
         result = server.admin_add(
             kind="rubric", ctx=None, framework="usaid",
             section="sustainability", criterion="x",
         )
-    assert result["routed_to"] == "queue"
-    contrib.assert_called_once()
+    assert result["routed_to"] == "caller_collection"
+    direct.assert_called_once()
 
 
 def test_admin_add_rubric_missing_fields():
@@ -166,32 +168,33 @@ def test_admin_add_rubric_missing_fields():
 # admin_add(kind="template")
 # ---------------------------------------------------------------------------
 
-def test_admin_add_template_admin_routes_library():
+def test_admin_add_template_routes_caller_collection():
+    """Per-user template: writes to caller's per-user collection (no queue)."""
     sections = [{"name": "Executive Summary", "description": "summary"}]
     with patch.object(server, "_client_id", return_value="admin-1"), \
-         patch.object(server, "_require_admin", return_value=None), \
-         patch("src.tools.templates.add_template", return_value=_ok()) as direct:
+         patch("src.tools.templates.add_template",
+               return_value={"success": True, "document_id": "doc-5"}) as direct:
         result = server.admin_add(
             kind="template", ctx=None, framework="undp",
             doc_type="concept-note", sections=sections,
         )
-    assert result["routed_to"] == "library"
+    assert result["routed_to"] == "caller_collection"
     direct.assert_called_once()
+    assert direct.call_args.kwargs["client_id"] == "admin-1"
 
 
-def test_admin_add_template_non_admin_routes_queue():
+def test_admin_add_template_non_admin_routes_caller_collection():
+    """Per-user template: non-admin also writes to their own collection (no queue)."""
     sections = [{"name": "Executive Summary", "description": "summary"}]
     with patch.object(server, "_client_id", return_value="bob"), \
-         patch.object(server, "_require_admin", return_value="no"), \
-         patch.object(server, "_notify_contribution"), \
-         patch("src.tools.contributions.contribute_template",
-               return_value={"success": True, "contribution_id": "c-4"}) as contrib:
+         patch("src.tools.templates.add_template",
+               return_value={"success": True, "document_id": "doc-6"}) as direct:
         result = server.admin_add(
             kind="template", ctx=None, framework="undp",
             doc_type="concept-note", sections=sections,
         )
-    assert result["routed_to"] == "queue"
-    contrib.assert_called_once()
+    assert result["routed_to"] == "caller_collection"
+    direct.assert_called_once()
 
 
 def test_admin_add_invalid_kind():
@@ -411,7 +414,7 @@ def test_search_thesaurus_default_path():
     with patch("src.tools.thesaurus.search_thesaurus",
                return_value={"success": True, "results": []}) as searcher, \
          patch("src.tools.thesaurus.suggest_alternatives") as rich:
-        out = server.search_thesaurus(query="leverage")
+        out = server.search_thesaurus(query="leverage", ctx=None)
     assert out["success"] is True
     searcher.assert_called_once()
     rich.assert_not_called()
@@ -421,7 +424,7 @@ def test_search_thesaurus_rich_uses_suggest_alternatives():
     with patch("src.tools.thesaurus.search_thesaurus") as searcher, \
          patch("src.tools.thesaurus.suggest_alternatives",
                return_value={"success": True, "alternatives": []}) as rich:
-        out = server.search_thesaurus(query="leverage", rich=True)
+        out = server.search_thesaurus(query="leverage", rich=True, ctx=None)
     assert out["success"] is True
     rich.assert_called_once()
     searcher.assert_not_called()

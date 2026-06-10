@@ -10,7 +10,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
-from src.tools.collections import get_collection_names, ensure_core_collection_indexes_once
+from src.tools.collections import get_collection_names, ensure_user_collections_once
 from src.tools.qdrant_errors import handle_qdrant_error
 from src.tools.registry import VALID_DOMAINS, VALID_LANGUAGES
 
@@ -69,8 +69,44 @@ def add_thesaurus_entry(
     example_bad: str = "",
     example_good: str = "",
     source: str = "manual",
+    client_id: str = "default",
 ) -> dict:
-    """Add a new entry to the writing_thesaurus collection."""
+    """
+    Add a new vocabulary entry to the user's per-user writing_thesaurus collection.
+
+    Args:
+        headword: The word or phrase to flag/avoid.
+        language: Language code (en, pt); must be in VALID_LANGUAGES.
+        domain: Domain slug; must be in VALID_DOMAINS.
+        definition: Short definition of what the word is.
+        part_of_speech: Category (verb, noun, adjective, etc.).
+        register: Formality/tone level (formal, neutral, informal, etc.).
+        alternatives: List of dicts with word, meaning_nuance, register, when_to_use.
+        collocations: List of common word phrases.
+        why_avoid: Reason to avoid this word.
+        example_bad: Example of poor usage.
+        example_good: Example of correct alternative usage.
+        source: Where this entry came from (manual, scrape, ai-detection, etc.).
+        client_id: User identifier; defaults to "default" in stdio mode.
+
+    Returns:
+        {success, document_id, chunks_created, collection} on success.
+        {success: False, error, existing_document_id (if duplicate)} on failure.
+
+    Raises:
+        Captures exceptions to Sentry via capture_tool_error.
+
+    Example:
+        result = add_thesaurus_entry(
+            headword="leverage",
+            language="en",
+            domain="general",
+            why_avoid="Overused in donor-speak",
+            alternatives=[{"word": "use", "meaning_nuance": "simple, clear"}],
+            client_id="user_456"
+        )
+        assert result["success"]
+    """
     if not headword or not headword.strip():
         return {"success": False, "error": "headword cannot be empty"}
     if language not in VALID_LANGUAGES:
@@ -84,7 +120,8 @@ def add_thesaurus_entry(
 
     alternatives = alternatives or []
     collocations = collocations or []
-    collection = get_collection_names()["thesaurus"]
+    ensure_user_collections_once(client_id)
+    collection = get_collection_names(client_id)["thesaurus"]
 
     # Duplicate check: same headword + language
     try:
@@ -138,8 +175,8 @@ def add_thesaurus_entry(
         qdrant_result = handle_qdrant_error(e, tool_name="add_thesaurus_entry", collection=collection, headword=headword)
         if qdrant_result is not None:
             return qdrant_result
-        logger.error("Failed to add thesaurus entry", error=str(e))
-        capture_tool_error(e, tool_name="add_thesaurus_entry", headword=headword)
+        logger.error("Failed to add thesaurus entry", error=str(e), client_id=client_id)
+        capture_tool_error(e, tool_name="add_thesaurus_entry", headword=headword, client_id=client_id)
         return {"success": False, "error": str(e)}
 
 
@@ -148,13 +185,38 @@ def search_thesaurus(
     language: Optional[str] = None,
     domain: Optional[str] = None,
     top_k: int = 8,
+    client_id: str = "default",
 ) -> dict:
-    """Semantic search across thesaurus entries."""
+    """
+    Semantic search across the user's thesaurus entries.
+
+    Args:
+        query: Search term (will be embedded and matched).
+        language: Optional language filter (en, pt, etc.).
+        domain: Optional domain filter.
+        top_k: Maximum results to return (default 8).
+        client_id: User identifier; defaults to "default" in stdio mode.
+
+    Returns:
+        {success, results: [{score, document_id, headword, language, domain, definition,
+         part_of_speech, register, alternatives, collocations, why_avoid, example_bad,
+         example_good, source}], total} on success.
+        {success: False, error, results: []} on failure.
+
+    Raises:
+        Captures exceptions to Sentry via capture_tool_error.
+
+    Example:
+        result = search_thesaurus(query="leverage", language="en", client_id="user_456")
+        assert result["success"]
+        for hit in result["results"]:
+            print(f"{hit['headword']}: {hit['score']}")
+    """
     if not query or not query.strip():
         return {"success": False, "error": "query cannot be empty"}
 
-    collection = get_collection_names()["thesaurus"]
-    ensure_core_collection_indexes_once()
+    ensure_user_collections_once(client_id)
+    collection = get_collection_names(client_id)["thesaurus"]
     filter_conditions = {}
     if language:
         filter_conditions["language"] = language
@@ -193,8 +255,8 @@ def search_thesaurus(
         if qdrant_result is not None:
             qdrant_result["results"] = []
             return qdrant_result
-        logger.error("Thesaurus search failed", error=str(e))
-        capture_tool_error(e, tool_name="search_thesaurus")
+        logger.error("Thesaurus search failed", error=str(e), client_id=client_id)
+        capture_tool_error(e, tool_name="search_thesaurus", client_id=client_id)
         return {"success": False, "error": str(e), "results": []}
 
 
@@ -218,14 +280,42 @@ def suggest_alternatives(
     word: Optional[str] = None,
     language: str = "en",
     domain: str = "general",
-    context_sentence: Optional[str] = None,  # Reserved for future semantic re-ranking; currently unused
+    context_sentence: Optional[str] = None,
     top_k: int = 5,
-    phrase: Optional[str] = None,  # Alias for word — accepted for backward compatibility
+    phrase: Optional[str] = None,
+    client_id: str = "default",
 ) -> dict:
     """
-    Look up a word in the thesaurus and return rich alternatives with semantic context.
+    Look up a word in the user's thesaurus and return rich alternatives with semantic context.
 
     Falls back to search_terms if the word is not in the thesaurus.
+
+    Args:
+        word: The word to look up.
+        language: Language code (en, pt, etc.).
+        domain: Domain slug.
+        context_sentence: Reserved for future semantic re-ranking; currently unused.
+        top_k: Maximum alternatives to return (default 5).
+        phrase: Alias for word — accepted for backward compatibility.
+        client_id: User identifier; defaults to "default" in stdio mode.
+
+    Returns:
+        {success, found_in_thesaurus, headword, language, domain, definition, part_of_speech,
+         register, why_avoid, alternatives, collocations, example_bad, example_good, source,
+         document_id} on success if found in thesaurus.
+        {success, found_in_thesaurus: False, headword, language, note, alternatives} if fallback
+        to terminology dictionary.
+        {success: False, error} on failure.
+
+    Raises:
+        Captures exceptions to Sentry via capture_tool_error.
+
+    Example:
+        result = suggest_alternatives(word="leverage", language="en", client_id="user_456")
+        assert result["success"]
+        print(f"Found: {result['found_in_thesaurus']}")
+        for alt in result["alternatives"]:
+            print(f"{alt['word']}: {alt.get('meaning_nuance', '')}")
     """
     word = word or phrase
     if not word or not word.strip():
@@ -235,7 +325,8 @@ def suggest_alternatives(
     if domain not in VALID_DOMAINS:
         return {"success": False, "error": f"Invalid domain '{domain}'. Must be one of: {sorted(VALID_DOMAINS)}"}
 
-    collection = get_collection_names()["thesaurus"]
+    ensure_user_collections_once(client_id)
+    collection = get_collection_names(client_id)["thesaurus"]
 
     try:
         raw = semantic_search(
@@ -246,7 +337,7 @@ def suggest_alternatives(
         )
     except Exception as e:
         raw = []
-        logger.warning("Thesaurus search failed in suggest_alternatives", error=str(e))
+        logger.warning("Thesaurus search failed in suggest_alternatives", error=str(e), client_id=client_id)
 
     # Find an exact headword match
     match = None
@@ -292,17 +383,43 @@ def flag_vocabulary(
     text: str,
     language: str = "en",
     domain: str = "general",
+    client_id: str = "default",
 ) -> dict:
     """
-    Scan text for words present in the thesaurus as AI-pattern headwords.
+    Scan text for words present in the user's thesaurus as flagged headwords.
 
-    Returns flagged words with positions and alternative previews.
-    Complements score_ai_patterns (structural) with lexical detection.
+    Returns flagged words with occurrence counts and alternative previews.
+    Complements score_writing_patterns (structural) with lexical detection.
+
+    Args:
+        text: Document text to scan.
+        language: Language code (en, pt, etc.).
+        domain: Domain slug.
+        client_id: User identifier; defaults to "default" in stdio mode.
+
+    Returns:
+        {success, flagged_count, verdict, flagged: [{headword, occurrences, why_avoid,
+         alternatives_preview, document_id}], language, domain, word_count} on success.
+        {success: False, error} on failure.
+        Verdict: "clean" (0 flagged), "review" (1–3 flagged), "ai-sounding" (4+ flagged).
+
+    Raises:
+        Captures exceptions to Sentry via capture_tool_error.
+
+    Example:
+        result = flag_vocabulary(
+            text="We will leverage our robust stakeholder network...",
+            language="en",
+            client_id="user_456"
+        )
+        assert result["success"]
+        print(result["verdict"])  # "clean", "review", or "ai-sounding"
     """
     if not text or not text.strip():
         return {"success": False, "error": "text cannot be empty"}
 
-    collection = get_collection_names()["thesaurus"]
+    ensure_user_collections_once(client_id)
+    collection = get_collection_names(client_id)["thesaurus"]
 
     # --- Step 1: fetch all headwords for this language in one query ---
     try:

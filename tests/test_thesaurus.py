@@ -6,10 +6,15 @@ from unittest.mock import patch, MagicMock
 
 
 def test_get_collection_names_includes_thesaurus():
+    """Multi-tenant refactor: thesaurus is now per-user (not core)."""
     from src.tools.collections import get_collection_names
     names = get_collection_names()
     assert "thesaurus" in names
-    assert names["thesaurus"] == "writing_thesaurus"
+    assert names["thesaurus"] == "default_writing_thesaurus"
+
+    # Custom client_id should have its own thesaurus collection
+    names_custom = get_collection_names("alice")
+    assert names_custom["thesaurus"] == "alice_writing_thesaurus"
 
 
 def test_add_thesaurus_entry_returns_document_id():

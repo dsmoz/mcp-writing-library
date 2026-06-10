@@ -6,7 +6,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
-from src.tools.collections import get_collection_names, ensure_core_collection_indexes_once
+from src.tools.collections import get_collection_names, ensure_user_collections_once
 from src.tools.qdrant_errors import handle_qdrant_error
 
 logger = structlog.get_logger(__name__)
@@ -30,19 +30,36 @@ def add_rubric_criterion(
     criterion: str,
     weight: float = 1.0,
     red_flags: Optional[List[str]] = None,
+    client_id: str = "default",
 ) -> dict:
     """
-    Store one evaluation criterion in the writing_rubrics Qdrant collection.
+    Store one evaluation criterion in the user's per-user writing_rubrics collection.
 
     Args:
-        framework: Evaluation framework slug — any lowercase slug (e.g. "usaid", "undp", "lambda", "oca-2025")
-        section: Section name (e.g. 'technical-approach', 'financial-management', 'methodology')
-        criterion: The criterion description (what evaluators look for)
-        weight: Relative importance 0.1–2.0 (default 1.0)
-        red_flags: Phrases/patterns evaluators penalise (optional)
+        framework: Evaluation framework slug — any lowercase slug (e.g. "usaid", "undp", "lambda", "oca-2025").
+        section: Section name (e.g. 'technical-approach', 'financial-management', 'methodology').
+        criterion: The criterion description (what evaluators look for).
+        weight: Relative importance 0.1–2.0 (default 1.0).
+        red_flags: Phrases/patterns evaluators penalise (optional).
+        client_id: User identifier; defaults to "default" in stdio mode.
 
     Returns:
-        {success, document_id, chunks_created, collection} on success
+        {success, document_id, chunks_created, collection} on success.
+        {success: False, error, error_type} on failure.
+
+    Raises:
+        Captures exceptions to Sentry via capture_tool_error.
+
+    Example:
+        result = add_rubric_criterion(
+            framework="usaid",
+            section="results-framework",
+            criterion="Targets must be SMART and donor-endorsed",
+            weight=1.5,
+            red_flags=["aspirational", "we hope to"],
+            client_id="user_456"
+        )
+        assert result["success"]
     """
     framework = framework.lower().strip()
     if not framework:
@@ -61,8 +78,8 @@ def add_rubric_criterion(
         return {"success": False, "error": "kbase library is not available"}
 
     document_id = str(uuid4())
-    collection = get_collection_names()["rubrics"]
-    ensure_core_collection_indexes_once()
+    ensure_user_collections_once(client_id)
+    collection = get_collection_names(client_id)["rubrics"]
     title = f"[{framework.upper()} | {section}] {criterion[:60]}"
     metadata = {
         "framework": framework,
@@ -91,8 +108,8 @@ def add_rubric_criterion(
         qdrant_result = handle_qdrant_error(e, tool_name="add_rubric_criterion", collection=collection, framework=framework)
         if qdrant_result is not None:
             return qdrant_result
-        logger.error("Failed to add rubric criterion", error=str(e))
-        capture_tool_error(e, tool_name="add_rubric_criterion", framework=framework)
+        logger.error("Failed to add rubric criterion", error=str(e), client_id=client_id)
+        capture_tool_error(e, tool_name="add_rubric_criterion", framework=framework, client_id=client_id)
         return {"success": False, "error": str(e)}
 
 
@@ -101,25 +118,41 @@ def score_against_rubric(
     framework: str,
     section: Optional[str] = None,
     top_k: int = 5,
-    doc_context: str = None,
+    doc_context: Optional[str] = None,
+    client_id: str = "default",
 ) -> dict:
     """
-    Score a document section against all stored criteria for a given framework.
+    Score a document section against all stored criteria in the user's rubrics.
 
     Args:
-        text: Document section to score
-        framework: Donor name to filter criteria
-        section: Optional section filter (e.g. "technical-approach")
-        top_k: Number of criteria to match (default 5)
+        text: Document section to score.
+        framework: Evaluation framework slug to filter criteria.
+        section: Optional section filter (e.g. "technical-approach").
+        top_k: Number of top-matching criteria to return (default 5).
         doc_context: Optional free-text context about the document type (e.g. "annual report").
             Not stored — informational only.
+        client_id: User identifier; defaults to "default" in stdio mode.
 
     Returns:
         {success, framework, section, text_length, criteria_matched, overall_score,
-         verdict, criteria, doc_context} on success
+         verdict, criteria, doc_context} on success.
+        {success: False, error} on failure.
+
+    Raises:
+        Captures exceptions to Sentry via capture_tool_error.
+
+    Example:
+        result = score_against_rubric(
+            text="We will increase coverage from 45% to 65% by 2027...",
+            framework="usaid",
+            section="results-framework",
+            client_id="user_456"
+        )
+        assert result["success"]
+        print(result["verdict"])  # "strong", "adequate", or "weak"
     """
     if doc_context:
-        logger.debug("score_against_rubric context", doc_context=doc_context)
+        logger.debug("score_against_rubric context", doc_context=doc_context, client_id=client_id)
     framework = framework.lower().strip()
     if not framework:
         return {"success": False, "error": "framework cannot be empty"}
@@ -127,8 +160,8 @@ def score_against_rubric(
     if semantic_search is None:
         return {"success": False, "error": "kbase library is not available"}
 
-    collection = get_collection_names()["rubrics"]
-    ensure_core_collection_indexes_once()
+    ensure_user_collections_once(client_id)
+    collection = get_collection_names(client_id)["rubrics"]
 
     filter_conditions: dict = {"framework": framework}
     if section:
@@ -145,8 +178,8 @@ def score_against_rubric(
         qdrant_result = handle_qdrant_error(e, tool_name="score_against_rubric", collection=collection, framework=framework)
         if qdrant_result is not None:
             return qdrant_result
-        logger.error("score_against_rubric search failed", error=str(e))
-        capture_tool_error(e, tool_name="score_against_rubric", framework=framework)
+        logger.error("score_against_rubric search failed", error=str(e), client_id=client_id)
+        capture_tool_error(e, tool_name="score_against_rubric", framework=framework, client_id=client_id)
         return {"success": False, "error": str(e)}
 
     if not raw_results:
@@ -202,17 +235,31 @@ def score_against_rubric(
     }
 
 
-def list_rubric_frameworks() -> dict:
+def list_rubric_frameworks(client_id: str = "default") -> dict:
     """
-    Return all frameworks that have at least one criterion stored.
+    Return all frameworks that have at least one criterion stored in the user's rubrics.
+
+    Args:
+        client_id: User identifier; defaults to "default" in stdio mode.
 
     Returns:
         {success, frameworks: [{framework, criterion_count}], total_frameworks, total_criteria}
+        on success. {success: False, error} on failure.
+
+    Raises:
+        Captures exceptions to Sentry via capture_tool_error.
+
+    Example:
+        result = list_rubric_frameworks(client_id="user_456")
+        assert result["success"]
+        for fw in result["frameworks"]:
+            print(f"{fw['framework']}: {fw['criterion_count']} criteria")
     """
     if get_qdrant_client is None:
         return {"success": False, "error": "kbase library is not available"}
 
-    collection = get_collection_names()["rubrics"]
+    ensure_user_collections_once(client_id)
+    collection = get_collection_names(client_id)["rubrics"]
 
     try:
         client = get_qdrant_client()
@@ -253,6 +300,6 @@ def list_rubric_frameworks() -> dict:
         qdrant_result = handle_qdrant_error(e, tool_name="list_rubric_frameworks", collection=collection)
         if qdrant_result is not None:
             return qdrant_result
-        logger.error("list_rubric_frameworks failed", error=str(e))
-        capture_tool_error(e, tool_name="list_rubric_frameworks")
+        logger.error("list_rubric_frameworks failed", error=str(e), client_id=client_id)
+        capture_tool_error(e, tool_name="list_rubric_frameworks", client_id=client_id)
         return {"success": False, "error": str(e)}

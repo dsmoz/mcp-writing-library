@@ -471,6 +471,7 @@ def score_evidence_density(text: str, domain: str = "general") -> dict:
 def score_against_rubric(
     text: str,
     framework: str,
+    ctx: Context,
     section: Optional[str] = None,
     top_k: int = 5,
     doc_context: Optional[str] = None,
@@ -491,11 +492,12 @@ def score_against_rubric(
         overall_score, verdict, matched criteria, doc_context.
     """
     from src.tools.rubrics import score_against_rubric as _score
-    return _score(text=text, framework=framework, section=section, top_k=top_k, doc_context=doc_context)
+    return _score(text=text, framework=framework, section=section, top_k=top_k,
+                  doc_context=doc_context, client_id=_client_id(ctx))
 
 
 @mcp.tool()
-def check_structure(text: str, framework: str, doc_type: str) -> StructureCheckResult:
+def check_structure(text: str, framework: str, doc_type: str, ctx: Context) -> StructureCheckResult:
     """
     Check whether a document covers all required sections from the stored template.
 
@@ -508,7 +510,7 @@ def check_structure(text: str, framework: str, doc_type: str) -> StructureCheckR
         verdict (complete|incomplete), per-section status (present|partial|missing), counts.
     """
     from src.tools.templates import check_structure as _check
-    return _check(text=text, framework=framework, doc_type=doc_type)
+    return _check(text=text, framework=framework, doc_type=doc_type, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -562,6 +564,7 @@ def detect_authorship_shift(text: str, min_segment_length: int = 100) -> dict:
 @mcp.tool()
 def flag_vocabulary(
     text: str,
+    ctx: Context,
     language: str = "en",
     domain: str = "general",
 ) -> VocabularyFlagResult:
@@ -577,7 +580,7 @@ def flag_vocabulary(
         verdict (clean|review|ai-sounding), flagged_count, flagged entries with alternatives_preview.
     """
     from src.tools.thesaurus import flag_vocabulary as _flag
-    return _flag(text=text, language=language, domain=domain)
+    return _flag(text=text, language=language, domain=domain, client_id=_client_id(ctx))
 
 
 # ===========================================================================
@@ -970,6 +973,7 @@ def manage_style_profile(
 @mcp.tool()
 def search_thesaurus(
     query: str,
+    ctx: Context,
     rich: bool = False,
     language: Optional[str] = None,
     domain: Optional[str] = None,
@@ -1007,9 +1011,10 @@ def search_thesaurus(
             domain=domain or "general",
             context_sentence=context_sentence,
             top_k=top_k if top_k != 8 else 5,
+            client_id=_client_id(ctx),
         )
     from src.tools.thesaurus import search_thesaurus as _search
-    return _search(query=query, language=language, domain=domain, top_k=top_k)
+    return _search(query=query, language=language, domain=domain, top_k=top_k, client_id=_client_id(ctx))
 
 
 @mcp.tool()
@@ -1148,21 +1153,23 @@ def admin_add(
     note: str = "",
 ) -> dict:
     """
-    **Admin-only direct writes; non-admins auto-route to the moderation queue.**
+    **Direct writes to caller's per-user collections.**
 
-    Add an entry to one of the three shared/core collections. `kind` selects the schema.
+    Add an entry to one of the per-user collections. `kind` selects the schema.
+    All callers (both admin and non-admin) write directly to their own per-user
+    collection—no moderation queue for these three kinds.
 
     Kinds:
-        rubric     — Store a rubric criterion. Requires: framework, section, criterion.
+        rubric     — Store a rubric criterion in caller's collection. Requires: framework, section, criterion.
                      Optional: weight (default 1.0), red_flags.
-        template   — Store a document template. Requires: framework, doc_type, sections
+        template   — Store a document template in caller's collection. Requires: framework, doc_type, sections
                      (list of {name, description, required?, order?} dicts).
-        thesaurus  — Store a thesaurus headword. Requires: headword.
+        thesaurus  — Store a thesaurus headword in caller's collection. Requires: headword.
                      Optional: language, domain, definition, part_of_speech, register,
                      alternatives, collocations, why_avoid, example_bad, example_good, source.
 
-    Non-admin callers are routed to the moderation queue (routed_to="queue"); admins write
-    directly (routed_to="library"). Pass `note` to leave a message for moderators when queued.
+    All writes go directly to the caller's per-user collection (routed_to="caller_collection").
+    The `note` parameter is ignored (no moderation queue for these kinds).
 
     Args:
         kind: rubric|template|thesaurus
@@ -1170,80 +1177,46 @@ def admin_add(
         framework, doc_type, sections: template fields
         headword, language, domain, definition, part_of_speech, register, alternatives,
             collocations, why_avoid, example_bad, example_good, source: thesaurus fields
-        note: Optional moderator note (queued contributions only)
+        note: Deprecated; ignored (no moderation for per-user collections).
 
     Returns:
-        {success, routed_to: "library"|"queue", ...} — shape varies by kind and route.
+        {success, routed_to: "caller_collection", ...} — shape varies by kind.
     """
     caller = _client_id(ctx)
-    is_admin = _require_admin(ctx) is None
 
     if kind == "rubric":
         if not (framework and section and criterion):
             return {"success": False, "error": "kind='rubric' requires 'framework', 'section', 'criterion'"}
-        if is_admin:
-            from src.tools.rubrics import add_rubric_criterion as _add
-            result = _add(framework=framework, section=section, criterion=criterion,
-                          weight=weight, red_flags=red_flags)
-            if result.get("success"):
-                result["routed_to"] = "library"
-            return result
-        from src.tools.contributions import contribute_rubric as _contribute
-        result = _contribute(
-            framework=framework, section=section, criterion=criterion,
-            contributed_by=caller, weight=weight, red_flags=red_flags, note=note,
-        )
+        from src.tools.rubrics import add_rubric_criterion as _add
+        result = _add(framework=framework, section=section, criterion=criterion,
+                      weight=weight, red_flags=red_flags, client_id=caller)
         if result.get("success"):
-            _notify_contribution(result.get("contribution_id", ""), "rubrics", f"{framework}/{section}", caller)
-            result["routed_to"] = "queue"
+            result["routed_to"] = "caller_collection"
         return result
 
     if kind == "template":
         if not (framework and doc_type and sections):
             return {"success": False, "error": "kind='template' requires 'framework', 'doc_type', 'sections'"}
-        if is_admin:
-            from src.tools.templates import add_template as _add
-            result = _add(framework=framework, doc_type=doc_type, sections=sections)
-            if result.get("success"):
-                result["routed_to"] = "library"
-            return result
-        from src.tools.contributions import contribute_template as _contribute
-        result = _contribute(
-            framework=framework, doc_type=doc_type, sections=sections,
-            contributed_by=caller, note=note,
-        )
+        from src.tools.templates import add_template as _add
+        result = _add(framework=framework, doc_type=doc_type, sections=sections, client_id=caller)
         if result.get("success"):
-            _notify_contribution(result.get("contribution_id", ""), "templates", f"{framework}/{doc_type}", caller)
-            result["routed_to"] = "queue"
+            result["routed_to"] = "caller_collection"
         return result
 
     if kind == "thesaurus":
         if not headword:
             return {"success": False, "error": "kind='thesaurus' requires 'headword'"}
-        if is_admin:
-            from src.tools.thesaurus import add_thesaurus_entry as _add
-            result = _add(
-                headword=headword, language=language, domain=domain,
-                definition=definition, part_of_speech=part_of_speech,
-                register=register, alternatives=alternatives or [],
-                collocations=collocations or [], why_avoid=why_avoid,
-                example_bad=example_bad, example_good=example_good, source=source,
-            )
-            if result.get("success"):
-                result["routed_to"] = "library"
-            return result
-        from src.tools.contributions import contribute_thesaurus_entry as _contribute
-        result = _contribute(
+        from src.tools.thesaurus import add_thesaurus_entry as _add
+        result = _add(
             headword=headword, language=language, domain=domain,
             definition=definition, part_of_speech=part_of_speech,
             register=register, alternatives=alternatives or [],
             collocations=collocations or [], why_avoid=why_avoid,
-            example_bad=example_bad, example_good=example_good,
-            contributed_by=caller, note=note,
+            example_bad=example_bad, example_good=example_good, source=source,
+            client_id=caller
         )
         if result.get("success"):
-            _notify_contribution(result.get("contribution_id", ""), "thesaurus", headword, caller)
-            result["routed_to"] = "queue"
+            result["routed_to"] = "caller_collection"
         return result
 
     return {"success": False, "error": f"Invalid kind '{kind}'. Must be one of: rubric, template, thesaurus"}
@@ -1535,14 +1508,14 @@ def resource_styles() -> dict:
 def resource_rubric_frameworks() -> dict:
     """Rubric frameworks that have at least one criterion stored, with per-framework criterion counts."""
     from src.tools.rubrics import list_rubric_frameworks as _list
-    return _list()
+    return _list(client_id=_client_id(None))
 
 
 @mcp.resource("writing-library://templates")
 def resource_templates() -> dict:
     """All stored document templates by framework + doc_type, with section counts."""
     from src.tools.templates import list_templates as _list
-    return _list()
+    return _list(client_id=_client_id(None))
 
 
 # ===========================================================================
