@@ -48,6 +48,26 @@ _PAYLOAD_KEYWORD_INDEXES: dict[str, tuple[str, ...]] = {
     "style_profiles": ("name", "channel"),
 }
 
+# Same requirement for core/shared collections. These are created by seed
+# scripts (not the per-user lazy path), and collections created before a
+# filter field was added never get its index from ensure_collection (which
+# returns early when the collection already exists). So patch them at runtime,
+# keyed by the field each core tool filters on:
+#   rubrics       — score_against_rubric filters framework + section
+#   templates     — check_structure filters framework + doc_type
+#   contributions — list/review filter status, target_collection,
+#                   contributed_by, contribution_id
+#   thesaurus / terms_shared — search filters language + domain
+# Creating an index is additive (it never reads or rewrites points), so this
+# is safe to run against a populated moderation queue.
+_CORE_PAYLOAD_KEYWORD_INDEXES: dict[str, tuple[str, ...]] = {
+    "rubrics": ("framework", "section", "entry_type"),
+    "templates": ("framework", "doc_type", "entry_type"),
+    "thesaurus": ("language", "domain", "entry_type"),
+    "terms_shared": ("language", "domain", "entry_type"),
+    "contributions": ("status", "target_collection", "contributed_by", "contribution_id", "entry_type"),
+}
+
 
 def get_core_collection_names() -> dict:
     """Return names for shared/core collections (not user-scoped).
@@ -199,6 +219,43 @@ def ensure_user_collections_once(client_id: str = "default") -> None:
         logger.warning("Could not ensure keyword payload indexes", error=str(e))
 
     _initialized_clients.add(client_id)
+
+
+_core_indexes_initialized = False
+
+
+def ensure_core_collection_indexes_once() -> None:
+    """Create keyword payload indexes on core/shared collections, once per process.
+
+    Idempotent: after the first successful pass, subsequent calls are no-ops.
+    Core collections (writing_rubrics, writing_templates, writing_contributions,
+    writing_thesaurus, writing_terms_shared) are created by seed scripts and so
+    bypass the per-user lazy index patch. Filtered queries against them (e.g.
+    score_against_rubric filtering ``framework``) fail with HTTP 400 unless the
+    field is indexed. Creating a payload index only adds an index — it never
+    reads, mutates, or deletes points — so this is safe on populated collections.
+    """
+    global _core_indexes_initialized
+    if _core_indexes_initialized:
+        return
+
+    try:
+        from kbase.vector.sync_client import get_qdrant_client
+
+        qc = get_qdrant_client()
+        core_collections = get_core_collection_names()
+        for collection_key, fields in _CORE_PAYLOAD_KEYWORD_INDEXES.items():
+            collection = core_collections.get(collection_key)
+            if not collection:
+                continue
+            for field in fields:
+                _ensure_keyword_index(qc, collection, field)
+        # Only latch the flag on a clean pass. If the client was transiently
+        # unreachable here, leave it unset so the migration retries on the next
+        # call rather than silently re-hiding the HTTP 400 it exists to fix.
+        _core_indexes_initialized = True
+    except Exception as e:
+        logger.warning("Could not ensure core keyword payload indexes", error=str(e))
 
 
 def get_stats(client_id: str = "default") -> dict:

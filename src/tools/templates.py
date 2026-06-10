@@ -6,7 +6,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
-from src.tools.collections import get_collection_names
+from src.tools.collections import get_collection_names, ensure_core_collection_indexes_once
 from src.tools.qdrant_errors import handle_qdrant_error
 from src.tools.registry import VALID_DOC_TYPES
 
@@ -118,6 +118,7 @@ def add_template(framework: str, doc_type: str, sections: list) -> dict:
 
     document_id = str(uuid4())
     collection = get_collection_names()["templates"]
+    ensure_core_collection_indexes_once()
     title = f"[{framework.upper()} | {doc_type}] Template"
 
     # Concatenate section names + descriptions for embedding
@@ -193,6 +194,7 @@ def check_structure(text: str, framework: str, doc_type: str) -> dict:
         return {"success": False, "error": "kbase library is not available"}
 
     collection = get_collection_names()["templates"]
+    ensure_core_collection_indexes_once()
 
     # Retrieve the template
     try:

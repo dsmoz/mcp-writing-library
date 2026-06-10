@@ -186,6 +186,38 @@ def generate_embeddings_batch(
     return all_embeddings
 
 
+# Sparse-vector index space. Token hashes are taken mod this value.
+SPARSE_HASH_MOD = 2**20  # ~1M possible indices
+
+
+def dedupe_sparse(
+    indices: List[int], values: List[float]
+) -> tuple[List[int], List[float]]:
+    """
+    Collapse duplicate sparse-vector indices, aggregating their values.
+
+    Qdrant rejects a SparseVector whose indices are not unique
+    (422: "indices: must be unique"). Distinct tokens can map to the same
+    index via hash collision (mod SPARSE_HASH_MOD), so any sparse vector
+    must be deduped before upsert/query. Colliding indices have their
+    values summed; the result is sorted by index for determinism.
+
+    Args:
+        indices: Sparse vector indices (may contain duplicates)
+        values: Parallel list of values
+
+    Returns:
+        (indices, values) with unique, ascending indices
+    """
+    from collections import defaultdict
+
+    agg: dict = defaultdict(float)
+    for i, v in zip(indices, values):
+        agg[i] += v
+    items = sorted(agg.items())
+    return [i for i, _ in items], [v for _, v in items]
+
+
 def generate_sparse_vector(text: str) -> tuple[List[int], List[float]]:
     """
     Generate a sparse vector for BM25-style keyword search.
@@ -197,7 +229,8 @@ def generate_sparse_vector(text: str) -> tuple[List[int], List[float]]:
         text: Text to convert to sparse vector
 
     Returns:
-        Tuple of (indices, values) for sparse vector
+        Tuple of (indices, values) for sparse vector. Indices are unique
+        and ascending (deduped against hash collisions).
     """
     import re
     from collections import Counter
@@ -211,20 +244,18 @@ def generate_sparse_vector(text: str) -> tuple[List[int], List[float]]:
     # Count term frequencies
     term_counts = Counter(tokens)
 
-    # Convert to sparse vector format
-    # Use hash of token as index (mod large prime for reasonable index range)
-    HASH_MOD = 2**20  # ~1M possible indices
-
     indices = []
     values = []
 
     for token, count in term_counts.items():
         # Use hash of token as index
-        token_hash = hash(token) % HASH_MOD
+        token_hash = hash(token) % SPARSE_HASH_MOD
         indices.append(token_hash)
         values.append(float(count))
 
-    return indices, values
+    # Distinct tokens can collide onto the same index mod SPARSE_HASH_MOD.
+    # Qdrant requires unique indices, so dedupe before returning.
+    return dedupe_sparse(indices, values)
 
 
 def generate_sparse_vectors_batch(texts: List[str]) -> List[tuple[List[int], List[float]]]:

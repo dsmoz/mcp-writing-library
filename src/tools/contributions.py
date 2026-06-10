@@ -54,7 +54,8 @@ except ImportError:
 
 
 def _contributions_collection() -> str:
-    from src.tools.collections import get_core_collection_names
+    from src.tools.collections import get_core_collection_names, ensure_core_collection_indexes_once
+    ensure_core_collection_indexes_once()
     return get_core_collection_names()["contributions"]
 
 
