@@ -252,7 +252,7 @@ def test_score_writing_patterns_invalid_mode_returns_error():
     out = server.score_writing_patterns(text="t", mode="bogus", ctx=None)
     assert out["success"] is False
     assert "Invalid mode" in out["error"]
-    assert "ai, semantic-ai, poetry, song, fiction" in out["error"]
+    assert "ai, pt, semantic-ai, poetry, song, fiction" in out["error"]
 
 
 # ---------------------------------------------------------------------------
