@@ -1,25 +1,32 @@
 """
 Contribution and moderation tools.
 
-Flow:
-    User calls contribute_term() / contribute_thesaurus_entry() / contribute_rubric() / contribute_template()
+ARCHITECTURAL CHANGES (Multi-tenancy refactor):
+    Rubrics, templates, and thesaurus are now PER-USER collections (no shared fallback).
+    Calls to contribute_rubric(), contribute_template(), contribute_thesaurus_entry()
+    now write directly to the caller's per-user collection (no moderation queue).
+
+    Terms remain shared: contribute_term() → moderation queue → writing_terms_shared.
+
+Flow for terms (shared, moderation queue):
+    User calls contribute_term()
     → entry stored in writing_contributions with status="pending"
     → Telegram notification sent to admin
 
-    Admin calls list_contributions(status="pending")
+    Admin calls list_contributions(status="pending", target="terms")
     → reviews entries
 
     Admin calls review_contribution(contribution_id, action="publish"|"reject")
-    → publish: copies entry into target shared collection (writing_terms_shared, writing_thesaurus, etc.)
+    → publish: copies entry into writing_terms_shared
     → reject: updates status + stores reason
 
     search_terms() queries user's personal terms first, then writing_terms_shared.
 
-Shared collections that accept contributions:
-    terms      → writing_terms_shared
-    thesaurus  → writing_thesaurus
-    rubrics    → writing_rubrics
-    templates  → writing_templates
+Flow for rubrics, templates, thesaurus (per-user, direct write):
+    User calls contribute_rubric() / contribute_template() / contribute_thesaurus_entry()
+    → entry written directly to caller's per-user collection
+    → no moderation queue (per-user collections need no admin review)
+    → returns success with routed_to="caller_collection"
 """
 import json
 import os
@@ -59,15 +66,28 @@ def _contributions_collection() -> str:
     return get_core_collection_names()["contributions"]
 
 
-def _target_collection(target: str) -> str:
-    from src.tools.collections import get_core_collection_names
-    mapping = {
-        "terms": get_core_collection_names()["terms_shared"],
-        "thesaurus": get_core_collection_names()["thesaurus"],
-        "rubrics": get_core_collection_names()["rubrics"],
-        "templates": get_core_collection_names()["templates"],
-    }
-    return mapping[target]
+def _target_collection(target: str, client_id: str = "default") -> str:
+    """
+    Return the collection name for a target entry type.
+
+    For "terms", returns the shared collection (writing_terms_shared).
+    For "rubrics", "templates", "thesaurus", returns the per-user collection
+    prefixed with client_id.
+
+    Args:
+        target: "terms"|"rubrics"|"templates"|"thesaurus"
+        client_id: User identifier for per-user collections (default "default")
+
+    Returns:
+        Collection name string
+    """
+    from src.tools.collections import get_core_collection_names, get_collection_names
+
+    if target == "terms":
+        return get_core_collection_names()["terms_shared"]
+    else:
+        # Per-user collections for rubrics, templates, thesaurus
+        return get_collection_names(client_id)[target]
 
 
 def _now_iso() -> str:
@@ -403,7 +423,21 @@ def review_contribution(
 
 
 def _publish_to_shared(target: str, payload: dict, source_contribution_id: str) -> None:
-    """Write the approved entry into the target shared collection."""
+    """
+    Write the approved contribution into the target collection.
+
+    For "terms", writes to the shared writing_terms_shared collection.
+    Rubrics, templates and thesaurus are per-user with no moderation queue —
+    they are written directly by admin_add → add_* and never reach this path.
+
+    Args:
+        target: "terms"|"rubrics"|"templates"|"thesaurus" (but only "terms" in practice)
+        payload: Entry fields to store
+        source_contribution_id: UUID of the contribution being published (for audit trail)
+
+    Raises:
+        Exception on Qdrant failure
+    """
     from kbase.vector.sync_indexing import ensure_collection as _ensure
     from src.tools.collections import get_core_collection_names
 
@@ -478,80 +512,3 @@ def contribute_term(
     return contribute(target="terms", payload=payload, contributed_by=contributed_by, note=note)
 
 
-def contribute_thesaurus_entry(
-    headword: str,
-    contributed_by: str,
-    language: str = "en",
-    domain: str = "general",
-    definition: str = "",
-    part_of_speech: str = "verb",
-    register: str = "neutral",
-    alternatives: Optional[list] = None,
-    collocations: Optional[list] = None,
-    why_avoid: str = "",
-    example_bad: str = "",
-    example_good: str = "",
-    note: str = "",
-) -> dict:
-    if not headword.strip():
-        return {"success": False, "error": "headword cannot be empty"}
-
-    payload = {
-        "headword": headword, "language": language, "domain": domain,
-        "definition": definition, "part_of_speech": part_of_speech,
-        "register": register,
-        "alternatives": json.dumps(alternatives or []),
-        "collocations": json.dumps(collocations or []),
-        "why_avoid": why_avoid, "example_bad": example_bad, "example_good": example_good,
-        "source": "contributed",
-        "entry_type": "thesaurus",
-    }
-    return contribute(target="thesaurus", payload=payload, contributed_by=contributed_by, note=note)
-
-
-def contribute_rubric(
-    framework: str,
-    section: str,
-    criterion: str,
-    contributed_by: str,
-    weight: float = 1.0,
-    red_flags: Optional[list] = None,
-    note: str = "",
-) -> dict:
-    if not framework.strip():
-        return {"success": False, "error": "framework cannot be empty"}
-    if not criterion.strip():
-        return {"success": False, "error": "criterion cannot be empty"}
-
-    payload = {
-        "framework": framework.lower().strip(),
-        "section": section, "criterion": criterion,
-        "weight": weight, "red_flags": red_flags or [],
-        "entry_type": "rubric_criterion",
-    }
-    return contribute(target="rubrics", payload=payload, contributed_by=contributed_by, note=note)
-
-
-def contribute_template(
-    framework: str,
-    doc_type: str,
-    sections: list,
-    contributed_by: str,
-    note: str = "",
-) -> dict:
-    from src.tools.registry import VALID_DOC_TYPES
-    if not framework.strip():
-        return {"success": False, "error": "framework cannot be empty"}
-    if doc_type not in VALID_DOC_TYPES:
-        return {"success": False, "error": f"Invalid doc_type '{doc_type}'. Must be one of: {sorted(VALID_DOC_TYPES)}"}
-    if not sections:
-        return {"success": False, "error": "sections cannot be empty"}
-
-    payload = {
-        "framework": framework.lower().strip(),
-        "doc_type": doc_type,
-        "sections": sections,
-        "section_count": len(sections),
-        "entry_type": "template",
-    }
-    return contribute(target="templates", payload=payload, contributed_by=contributed_by, note=note)

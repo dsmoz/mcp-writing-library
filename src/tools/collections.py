@@ -4,19 +4,24 @@ Collection management for writing library Qdrant collections.
 Multi-tenant architecture (Option B — collection prefix):
 
     Core collections (shared, read-only to users):
-        writing_thesaurus
-        writing_rubrics
-        writing_templates
+        writing_terms_shared — published terms contributed by all users (read by search_terms)
+        writing_contributions — moderation queue for term contributions (status, target_collection filter)
 
     Per-user collections (isolated by client_id prefix):
         {client_id}_writing_passages
         {client_id}_writing_terms
         {client_id}_writing_style_profiles
+        {client_id}_writing_rubrics
+        {client_id}_writing_templates
+        {client_id}_writing_thesaurus
 
     In stdio mode (no auth), client_id defaults to "default", giving:
         default_writing_passages
         default_writing_terms
         default_writing_style_profiles
+        default_writing_rubrics
+        default_writing_templates
+        default_writing_thesaurus
 
     Collections are created lazily on first use via setup_user_collections().
 """
@@ -45,7 +50,11 @@ def _safe_client_id(client_id: str) -> str:
 # unindexed field, so we create them eagerly on first use per client_id.
 _PAYLOAD_KEYWORD_INDEXES: dict[str, tuple[str, ...]] = {
     "passages": ("entry_type", "doc_type", "language", "domain", "rubric_section"),
+    "terms": ("language", "domain", "entry_type"),
     "style_profiles": ("name", "channel"),
+    "rubrics": ("framework", "section", "entry_type"),
+    "templates": ("framework", "doc_type", "entry_type"),
+    "thesaurus": ("language", "domain", "entry_type"),
 }
 
 # Same requirement for core/shared collections. These are created by seed
@@ -53,17 +62,12 @@ _PAYLOAD_KEYWORD_INDEXES: dict[str, tuple[str, ...]] = {
 # filter field was added never get its index from ensure_collection (which
 # returns early when the collection already exists). So patch them at runtime,
 # keyed by the field each core tool filters on:
-#   rubrics       — score_against_rubric filters framework + section
-#   templates     — check_structure filters framework + doc_type
 #   contributions — list/review filter status, target_collection,
 #                   contributed_by, contribution_id
-#   thesaurus / terms_shared — search filters language + domain
+#   terms_shared — search filters language + domain
 # Creating an index is additive (it never reads or rewrites points), so this
 # is safe to run against a populated moderation queue.
 _CORE_PAYLOAD_KEYWORD_INDEXES: dict[str, tuple[str, ...]] = {
-    "rubrics": ("framework", "section", "entry_type"),
-    "templates": ("framework", "doc_type", "entry_type"),
-    "thesaurus": ("language", "domain", "entry_type"),
     "terms_shared": ("language", "domain", "entry_type"),
     "contributions": ("status", "target_collection", "contributed_by", "contribution_id", "entry_type"),
 }
@@ -72,25 +76,32 @@ _CORE_PAYLOAD_KEYWORD_INDEXES: dict[str, tuple[str, ...]] = {
 def get_core_collection_names() -> dict:
     """Return names for shared/core collections (not user-scoped).
 
-    writing_terms_shared — published terms contributed by users (read by all search_terms calls)
-    writing_contributions — moderation queue (pending/published/rejected contributions)
+    writing_terms_shared — published terms contributed by users (read by all search_terms calls).
+    writing_contributions — moderation queue (pending/published/rejected contributions for terms only).
+
+    Note: rubrics, templates, thesaurus are now per-user collections.
     """
     return {
-        "rubrics": os.getenv("COLLECTION_RUBRICS", "writing_rubrics"),
-        "templates": os.getenv("COLLECTION_TEMPLATES", "writing_templates"),
-        "thesaurus": os.getenv("COLLECTION_THESAURUS", "writing_thesaurus"),
         "terms_shared": os.getenv("COLLECTION_TERMS_SHARED", "writing_terms_shared"),
         "contributions": os.getenv("COLLECTION_CONTRIBUTIONS", "writing_contributions"),
     }
 
 
 def get_user_collection_names(client_id: str = "default") -> dict:
-    """Return per-user collection names prefixed with the client_id."""
+    """Return per-user collection names prefixed with the client_id.
+
+    Each user has isolated collections for passages, terms, style profiles, rubrics,
+    templates, and thesaurus. These collections are created lazily on first use and
+    are never shared with other users.
+    """
     uid = _safe_client_id(client_id)
     return {
         "passages": f"{uid}_writing_passages",
         "terms": f"{uid}_writing_terms",
         "style_profiles": f"{uid}_writing_style_profiles",
+        "rubrics": f"{uid}_writing_rubrics",
+        "templates": f"{uid}_writing_templates",
+        "thesaurus": f"{uid}_writing_thesaurus",
     }
 
 
@@ -228,12 +239,11 @@ def ensure_core_collection_indexes_once() -> None:
     """Create keyword payload indexes on core/shared collections, once per process.
 
     Idempotent: after the first successful pass, subsequent calls are no-ops.
-    Core collections (writing_rubrics, writing_templates, writing_contributions,
-    writing_thesaurus, writing_terms_shared) are created by seed scripts and so
-    bypass the per-user lazy index patch. Filtered queries against them (e.g.
-    score_against_rubric filtering ``framework``) fail with HTTP 400 unless the
-    field is indexed. Creating a payload index only adds an index — it never
-    reads, mutates, or deletes points — so this is safe on populated collections.
+    Core collections (writing_contributions, writing_terms_shared) are created by
+    seed scripts and so bypass the per-user lazy index patch. Filtered queries
+    against them (e.g. listing contributions) fail with HTTP 400 unless the field
+    is indexed. Creating a payload index only adds an index — it never reads,
+    mutates, or deletes points — so this is safe on populated collections.
     """
     global _core_indexes_initialized
     if _core_indexes_initialized:

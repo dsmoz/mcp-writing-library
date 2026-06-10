@@ -6,7 +6,7 @@ from uuid import uuid4
 import structlog
 
 from src.sentry import capture_tool_error
-from src.tools.collections import get_collection_names, ensure_core_collection_indexes_once
+from src.tools.collections import get_collection_names, ensure_user_collections_once
 from src.tools.qdrant_errors import handle_qdrant_error
 from src.tools.registry import VALID_DOC_TYPES
 
@@ -67,22 +67,38 @@ def _keyword_coverage(section_name: str, section_description: str, paragraph: st
     return matches / len(words)
 
 
-def add_template(framework: str, doc_type: str, sections: list) -> dict:
+def add_template(framework: str, doc_type: str, sections: list, client_id: str = "default") -> dict:
     """
-    Store a proposal template (list of required sections) for a framework+doc_type combination.
+    Store a proposal template (list of required sections) in the user's per-user collection.
 
     Args:
-        framework: Evaluation framework slug — any lowercase slug (e.g. "undp", "lambda", "ds-moz")
-        doc_type: Document type — must be one of the valid doc_types (see registry)
+        framework: Evaluation framework slug — any lowercase slug (e.g. "undp", "lambda", "ds-moz").
+        doc_type: Document type — must be one of the valid doc_types (see registry).
         sections: List of section dicts. Each must have:
                   - name (str): Section name
                   - description (str): What this section should contain
                   - required (bool, optional): Whether mandatory (default True)
                   - order (int, optional): Expected position 1-based (default = list index + 1)
+        client_id: User identifier; defaults to "default" in stdio mode.
 
     Returns:
         {success, document_id, chunks_created, framework, doc_type, section_count} on success,
-        or {success: False, error} on invalid input
+        or {success: False, error} on invalid input.
+
+    Raises:
+        Captures exceptions to Sentry via capture_tool_error.
+
+    Example:
+        result = add_template(
+            framework="usaid",
+            doc_type="full-proposal",
+            sections=[
+                {"name": "Project Abstract", "description": "1-page summary"},
+                {"name": "Results Framework", "description": "M&E matrix"}
+            ],
+            client_id="user_456"
+        )
+        assert result["success"]
     """
     framework = framework.lower().strip()
     doc_type = doc_type.lower()
@@ -117,8 +133,8 @@ def add_template(framework: str, doc_type: str, sections: list) -> dict:
         return {"success": False, "error": "kbase library is not available"}
 
     document_id = str(uuid4())
-    collection = get_collection_names()["templates"]
-    ensure_core_collection_indexes_once()
+    ensure_user_collections_once(client_id)
+    collection = get_collection_names(client_id)["templates"]
     title = f"[{framework.upper()} | {doc_type}] Template"
 
     # Concatenate section names + descriptions for embedding
@@ -156,24 +172,39 @@ def add_template(framework: str, doc_type: str, sections: list) -> dict:
         qdrant_result = handle_qdrant_error(e, tool_name="add_template", collection=collection, framework=framework, doc_type=doc_type)
         if qdrant_result is not None:
             return qdrant_result
-        logger.error("Failed to add template", error=str(e))
-        capture_tool_error(e, tool_name="add_template", framework=framework, doc_type=doc_type)
+        logger.error("Failed to add template", error=str(e), client_id=client_id)
+        capture_tool_error(e, tool_name="add_template", framework=framework, doc_type=doc_type, client_id=client_id)
         return {"success": False, "error": str(e)}
 
 
-def check_structure(text: str, framework: str, doc_type: str) -> dict:
+def check_structure(text: str, framework: str, doc_type: str, client_id: str = "default") -> dict:
     """
-    Check whether a document draft covers all required sections from the stored template.
+    Check whether a document draft covers all required sections from the user's template.
 
     Args:
-        text: The document draft text to check
-        framework: Evaluation framework slug — any lowercase slug (e.g. "undp", "lambda", "ds-moz")
-        doc_type: Document type — must be one of the valid doc_types (see registry)
+        text: The document draft text to check.
+        framework: Evaluation framework slug — any lowercase slug (e.g. "undp", "lambda", "ds-moz").
+        doc_type: Document type — must be one of the valid doc_types (see registry).
+        client_id: User identifier; defaults to "default" in stdio mode.
 
     Returns:
         {success, framework, doc_type, template_document_id, total_sections, required_sections,
          present_count, partial_count, missing_count, verdict, sections, missing_required}
-        verdict is "complete" (0 missing required) or "incomplete" (>0 missing required)
+        on success. verdict is "complete" (0 missing required) or "incomplete" (>0 missing required).
+        {success: False, error} on failure.
+
+    Raises:
+        Captures exceptions to Sentry via capture_tool_error.
+
+    Example:
+        result = check_structure(
+            text="Project Abstract\n\nResults Framework\n\n...",
+            framework="usaid",
+            doc_type="full-proposal",
+            client_id="user_456"
+        )
+        assert result["success"]
+        print(result["verdict"])  # "complete" or "incomplete"
     """
     if not text or not text.strip():
         return {"success": False, "error": "text cannot be empty"}
@@ -193,8 +224,8 @@ def check_structure(text: str, framework: str, doc_type: str) -> dict:
     if semantic_search is None:
         return {"success": False, "error": "kbase library is not available"}
 
-    collection = get_collection_names()["templates"]
-    ensure_core_collection_indexes_once()
+    ensure_user_collections_once(client_id)
+    collection = get_collection_names(client_id)["templates"]
 
     # Retrieve the template
     try:
@@ -208,8 +239,8 @@ def check_structure(text: str, framework: str, doc_type: str) -> dict:
         qdrant_result = handle_qdrant_error(e, tool_name="check_structure", collection=collection, framework=framework, doc_type=doc_type)
         if qdrant_result is not None:
             return qdrant_result
-        logger.error("check_structure search failed", error=str(e))
-        capture_tool_error(e, tool_name="check_structure", framework=framework, doc_type=doc_type)
+        logger.error("check_structure search failed", error=str(e), client_id=client_id)
+        capture_tool_error(e, tool_name="check_structure", framework=framework, doc_type=doc_type, client_id=client_id)
         return {"success": False, "error": str(e)}
 
     if not raw_results:
@@ -346,18 +377,31 @@ def check_structure(text: str, framework: str, doc_type: str) -> dict:
     }
 
 
-def list_templates() -> dict:
+def list_templates(client_id: str = "default") -> dict:
     """
-    Return all stored templates.
+    Return all templates stored in the user's collection.
+
+    Args:
+        client_id: User identifier; defaults to "default" in stdio mode.
 
     Returns:
         {success, templates: [{framework, doc_type, section_count, document_id}], total}
-        Sorted by framework then doc_type.
+        Sorted by framework then doc_type. {success: False, error} on failure.
+
+    Raises:
+        Captures exceptions to Sentry via capture_tool_error.
+
+    Example:
+        result = list_templates(client_id="user_456")
+        assert result["success"]
+        for tpl in result["templates"]:
+            print(f"{tpl['framework']}: {tpl['doc_type']}")
     """
     if get_qdrant_client is None:
         return {"success": False, "error": "kbase library is not available"}
 
-    collection = get_collection_names()["templates"]
+    ensure_user_collections_once(client_id)
+    collection = get_collection_names(client_id)["templates"]
 
     try:
         client = get_qdrant_client()
@@ -398,6 +442,6 @@ def list_templates() -> dict:
         qdrant_result = handle_qdrant_error(e, tool_name="list_templates", collection=collection)
         if qdrant_result is not None:
             return qdrant_result
-        logger.error("list_templates failed", error=str(e))
-        capture_tool_error(e, tool_name="list_templates")
+        logger.error("list_templates failed", error=str(e), client_id=client_id)
+        capture_tool_error(e, tool_name="list_templates", client_id=client_id)
         return {"success": False, "error": str(e)}
