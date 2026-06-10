@@ -4,26 +4,39 @@ from unittest.mock import patch, MagicMock
 
 
 def test_get_collection_names_default_client():
-    """Default client_id produces 'default_' prefixed per-user collections."""
+    """Default client_id produces 'default_' prefixed per-user collections.
+
+    Multi-tenant refactor: rubrics, templates, thesaurus are now per-user (not core).
+    """
     from src.tools.collections import get_collection_names
     names = get_collection_names()
     assert names["passages"] == "default_writing_passages"
     assert names["terms"] == "default_writing_terms"
     assert names["style_profiles"] == "default_writing_style_profiles"
-    # Core collections are not prefixed
-    assert names["rubrics"] == "writing_rubrics"
-    assert names["thesaurus"] == "writing_thesaurus"
+    assert names["rubrics"] == "default_writing_rubrics"
+    assert names["templates"] == "default_writing_templates"
+    assert names["thesaurus"] == "default_writing_thesaurus"
+    # Only shared collections are not prefixed
+    assert names["terms_shared"] == "writing_terms_shared"
+    assert names["contributions"] == "writing_contributions"
 
 
 def test_get_collection_names_custom_client():
-    """Custom client_id produces correctly prefixed per-user collections."""
+    """Custom client_id produces correctly prefixed per-user collections.
+
+    Multi-tenant refactor: rubrics, templates, thesaurus are now per-user (not core).
+    """
     from src.tools.collections import get_collection_names
     names = get_collection_names("acme-corp")
     assert names["passages"] == "acme-corp_writing_passages"
     assert names["terms"] == "acme-corp_writing_terms"
     assert names["style_profiles"] == "acme-corp_writing_style_profiles"
-    # Core collections unchanged
-    assert names["rubrics"] == "writing_rubrics"
+    assert names["rubrics"] == "acme-corp_writing_rubrics"
+    assert names["templates"] == "acme-corp_writing_templates"
+    assert names["thesaurus"] == "acme-corp_writing_thesaurus"
+    # Only shared collections unchanged
+    assert names["terms_shared"] == "writing_terms_shared"
+    assert names["contributions"] == "writing_contributions"
 
 
 def test_ensure_user_collections_once_creates_all_filter_indexes():
@@ -80,11 +93,12 @@ def test_ensure_user_collections_once_tolerates_existing_indexes():
             collections_mod.ensure_user_collections_once("dup")  # must not raise
 
 
-def test_ensure_core_collection_indexes_once_creates_rubric_filter_indexes():
-    """Bug 1 regression: score_against_rubric filters framework + section on
-    writing_rubrics, which Qdrant rejects with HTTP 400 unless those fields are
-    keyword-indexed. Core collections are seeded outside the per-user lazy path,
-    so a dedicated runtime migration must create the indexes.
+def test_ensure_core_collection_indexes_once_creates_shared_collection_filter_indexes():
+    """Multi-tenant refactor: Shared collections (terms_shared, contributions) require
+    keyword indexes for filter-based queries.
+
+    Rubrics and templates are now per-user, so their indexes are created via
+    ensure_user_collections_once() instead.
     """
     from src.tools import collections as collections_mod
 
@@ -100,17 +114,14 @@ def test_ensure_core_collection_indexes_once_creates_rubric_filter_indexes():
         for call in mock_client.create_payload_index.call_args_list
     }
 
-    # The HTTP 400 from Sentry was on framework; section is the other filter on
-    # the same tool and must be covered too.
-    assert ("writing_rubrics", "framework") in indexed
-    assert ("writing_rubrics", "section") in indexed
-    # Other core collections that tools filter on are covered in the same pass.
-    assert ("writing_templates", "framework") in indexed
-    assert ("writing_templates", "doc_type") in indexed
+    # Core shared collections and their filter fields
     assert ("writing_contributions", "status") in indexed
     assert ("writing_contributions", "target_collection") in indexed
+    assert ("writing_contributions", "contributed_by") in indexed
+    assert ("writing_contributions", "contribution_id") in indexed
     assert ("writing_terms_shared", "language") in indexed
     assert ("writing_terms_shared", "domain") in indexed
+    assert ("writing_terms_shared", "entry_type") in indexed
 
     # Flag latches after a clean pass, so the next call is a no-op.
     assert collections_mod._core_indexes_initialized is True
