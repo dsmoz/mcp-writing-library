@@ -186,7 +186,10 @@ def generate_embeddings_batch(
     return all_embeddings
 
 
-# Sparse-vector index space. Token hashes are taken mod this value.
+# Sparse-vector index space for the deterministic md5 fallback encoder.
+# Token md5 hashes are taken mod this value. A fitted BM25 encoder, when
+# present, uses its own (sequential) vocab index space instead; both stay
+# within this 2**20 bound so the Postgres ``sparsevec(1048576)`` mirror fits.
 SPARSE_HASH_MOD = 2**20  # ~1M possible indices
 
 
@@ -218,49 +221,92 @@ def dedupe_sparse(
     return [i for i, _ in items], [v for _, v in items]
 
 
+def _require_fitted_encoder() -> bool:
+    """Whether to hard-fail rather than silently use the md5 fallback."""
+    return os.getenv("BM25_REQUIRE_FITTED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 def generate_sparse_vector(text: str) -> tuple[List[int], List[float]]:
     """
-    Generate a sparse vector for BM25-style keyword search.
+    Generate a DETERMINISTIC sparse vector for BM25-style keyword search.
 
-    Uses simple tokenization and term frequency counting.
-    The IDF modifier is applied by Qdrant at query time.
+    HISTORY / BUG: this function used to derive indices from the builtin
+    ``hash(token) % SPARSE_HASH_MOD``. CPython salts ``hash(str)`` per process
+    (PYTHONHASHSEED), so the indices produced when a document was *indexed*
+    never matched the indices produced for the same terms at *query* time in a
+    different process. The hybrid sparse arm therefore returned effectively
+    nothing and hybrid search silently collapsed to dense-only in production.
+
+    FIX: delegate to :func:`kbase.vector.hybrid_embeddings.get_sparse_embedding`,
+    which uses a fitted BM25 vocab encoder when an artifact is available
+    (``BM25_ENCODER_PATH`` or the default ``.data/bm25_encoder.pkl``) and a
+    deterministic md5-hashed TF fallback otherwise. Both the index path
+    (:func:`generate_sparse_vectors_batch`) and the query path (``sync_search``)
+    call this one function, so both use the identical deterministic encoder and
+    their indices reproducibly line up across processes.
+
+    See ``docs/sparse-encoder-fix-runbook.md``.
 
     Args:
         text: Text to convert to sparse vector
 
     Returns:
         Tuple of (indices, values) for sparse vector. Indices are unique
-        and ascending (deduped against hash collisions).
+        and ascending (deduped against md5 hash collisions). Empty input
+        (no usable tokens) yields ``([], [])``.
     """
-    import re
-    from collections import Counter
+    # Local imports keep the dependency one-directional (hybrid_embeddings and
+    # bm25_encoder never import this module) and avoid import-time cost for
+    # callers that never touch sparse vectors.
+    from kbase.vector.hybrid_embeddings import get_sparse_embedding
+    from kbase.vector.bm25_encoder import get_bm25_encoder
 
-    # Simple tokenization: lowercase, split on non-alphanumeric, filter short tokens
-    tokens = re.findall(r'\b[a-z0-9]{2,}\b', text.lower())
+    encoder_path = os.getenv("BM25_ENCODER_PATH") or None
 
-    if not tokens:
+    if _require_fitted_encoder() and get_bm25_encoder(encoder_path) is None:
+        raise RuntimeError(
+            "BM25_REQUIRE_FITTED is set but no fitted BM25 encoder was found "
+            f"(BM25_ENCODER_PATH={encoder_path or '.data/bm25_encoder.pkl'}). "
+            "Refusing to fall back to the md5 encoder, which lives in a "
+            "different index space and would silently break hybrid search "
+            "against fitted-encoder data. Deploy the fitted artifact (see the "
+            "runbook) or unset BM25_REQUIRE_FITTED."
+        )
+
+    sv = get_sparse_embedding(text, encoder_path=encoder_path)
+
+    # get_sparse_embedding returns an all-zero sentinel ([0], [0.0]) for text
+    # with no usable tokens. Drop zero-weight entries so empty input yields an
+    # empty vector (historical contract) and no bogus index-0 mass is stored.
+    # Real BM25/TF weights are always strictly positive, so this only strips
+    # the sentinel, never a legitimate term.
+    pairs = [
+        (int(i), float(v))
+        for i, v in zip(sv.indices, sv.values)
+        if float(v) != 0.0
+    ]
+    if not pairs:
         return [], []
 
-    # Count term frequencies
-    term_counts = Counter(tokens)
+    indices = [i for i, _ in pairs]
+    values = [v for _, v in pairs]
 
-    indices = []
-    values = []
-
-    for token, count in term_counts.items():
-        # Use hash of token as index
-        token_hash = hash(token) % SPARSE_HASH_MOD
-        indices.append(token_hash)
-        values.append(float(count))
-
-    # Distinct tokens can collide onto the same index mod SPARSE_HASH_MOD.
-    # Qdrant requires unique indices, so dedupe before returning.
+    # A fitted vocab yields unique indices; the md5 fallback can collide.
+    # Qdrant requires unique indices, so dedupe (and sort) before returning.
     return dedupe_sparse(indices, values)
 
 
 def generate_sparse_vectors_batch(texts: List[str]) -> List[tuple[List[int], List[float]]]:
     """
     Generate sparse vectors for multiple texts.
+
+    Uses the same deterministic encoder as :func:`generate_sparse_vector`, so
+    indexed vectors reproducibly match query vectors across processes.
 
     Args:
         texts: List of texts to convert
