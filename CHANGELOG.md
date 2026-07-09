@@ -3,6 +3,29 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
+## [Unreleased]
+
+### Fixed
+
+- **Sparse (BM25) hybrid-search arm was silently dead in production.**
+  `generate_sparse_vector` derived indices from the builtin `hash(token)`, which
+  CPython salts per process (`PYTHONHASHSEED`). Indices produced at index time
+  never matched indices produced at query time in another process, so the stored
+  sparse vectors were unreproducible and the sparse arm returned effectively
+  nothing — hybrid search collapsed to dense-only. `generate_sparse_vector` now
+  delegates to a deterministic encoder (fitted BM25 vocab when a
+  `BM25_ENCODER_PATH` artifact is present, else a deterministic md5 fallback);
+  index and query share the one function. Requires a full sparse re-index of
+  every writing collection — see `docs/sparse-encoder-fix-runbook.md`.
+
+### Added
+
+- `scripts/train_bm25_encoder.py` — fit one shared BM25 encoder over all writing
+  collections; `scripts/reindex_sparse.py` — regenerate only the `sparse` named
+  vector per point (dense/payload untouched); `scripts/which_encoder.py` —
+  diagnose stored-vector reproducibility and text-query self-rank.
+- `BM25_ENCODER_PATH` / `BM25_REQUIRE_FITTED` env vars (see `.env.example`).
+
 ## [1.8.0] - 2026-05-22
 
 ### Added
